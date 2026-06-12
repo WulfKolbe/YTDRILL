@@ -3,35 +3,41 @@
 #   <stem>.tiddler.json   TiddlyWiki import file
 #   <stem>.summary.md     Sonar summary (only when a transcript existed)
 #   <stem>.slides.pdf     searchable OCR'd slide deck
-# Mapping uses the SAME find|sort enumeration as batch-testdata.sh.
+# Mapping is by tiddler caption (= video stem), NOT by batch index, so it
+# survives reordered/partial/interrupted batch runs. Afterwards lists every
+# video that still has no tiddler sidecar.
 OUT="$HOME/Downloads/yt2tw-batch"
 cd "$(dirname "$0")"
 
-i=0; copied=0; missing=0
-find testdata -name '*.mkv' -print0 | sort -z | while IFS= read -r -d '' f; do
-  i=$((i+1))
-  d="$OUT/$(printf '%03d' "$i")"
-  stem="${f%.mkv}"
-  tiddler=$(ls "$d"/*_video_0001.json 2>/dev/null | head -1)
-  if [ -z "$tiddler" ]; then
-    echo "MISSING [$i] $(basename "$f")"
-    missing=$((missing+1))
-    continue
-  fi
-  # safety: tiddler caption must match the video stem
-  if ! python3 - "$tiddler" "$(basename "$stem")" <<'EOF'
-import json, sys
-t = json.load(open(sys.argv[1]))[0]
-sys.exit(0 if t.get("caption") == sys.argv[2] else 1)
+python3 - "$OUT" <<'EOF'
+import json, shutil, sys
+from pathlib import Path
+
+out = Path(sys.argv[1])
+testdata = Path("testdata")
+videos = {p.stem: p for p in testdata.rglob("*.mkv")}
+
+copied = mismatched = 0
+for tiddler in sorted(out.glob("*/*_video_0001.json")):
+    caption = json.load(open(tiddler))[0].get("caption", "")
+    video = videos.get(caption)
+    if video is None:
+        print(f"NO SOURCE for workdir {tiddler.parent.name}: {caption!r}")
+        mismatched += 1
+        continue
+    stem = video.with_suffix("")
+    shutil.copy2(tiddler, f"{stem}.tiddler.json")
+    summary = tiddler.parent / "summary.md"
+    if summary.is_file():
+        shutil.copy2(summary, f"{stem}.summary.md")
+    pdfs = list(tiddler.parent.glob("*_slides.pdf"))
+    if pdfs:
+        shutil.copy2(pdfs[0], f"{stem}.slides.pdf")
+    copied += 1
+
+todo = [p for s, p in sorted(videos.items())
+        if not Path(f"{p.with_suffix('')}.tiddler.json").is_file()]
+for p in todo:
+    print(f"MISSING {p.name}")
+print(f"collected: {copied}, no-source: {mismatched}, missing: {len(todo)}")
 EOF
-  then
-    echo "MISMATCH [$i] $(basename "$f") vs $(basename "$tiddler")"
-    continue
-  fi
-  cp "$tiddler" "$stem.tiddler.json"
-  [ -f "$d/summary.md" ] && cp "$d/summary.md" "$stem.summary.md"
-  pdf=$(ls "$d"/*_slides.pdf 2>/dev/null | head -1)
-  [ -n "$pdf" ] && cp "$pdf" "$stem.slides.pdf"
-  copied=$((copied+1))
-done
-echo "collected: $copied, missing: $missing"
