@@ -1,0 +1,33 @@
+{
+  "procOrder": [
+    "fetch_info",
+    "transcript",
+    "summarize",
+    "extract_references",
+    "emit_tiddler"
+  ],
+  "modules": {
+    "fetch_info": {
+      "cookiesfrombrowser": "",
+      "max_comments": 0
+    },
+    "transcript": {},
+    "summarize": {
+      "model": "sonar",
+      "max_tokens": 4096,
+      "temperature": 0.2,
+      "secret_cmd": "apivault get perplexity",
+      "howto": "prompts/howto.md"
+    },
+    "media": {
+      "format": "",
+      "outtmpl": "%(id)s.%(ext)s"
+    },
+    "emit_tiddler": {
+      "tiddler_type": "video",
+      "text_type": "text/markdown",
+      "extra_tags": []
+    },
+    "extract_references": {}
+  }
+}
