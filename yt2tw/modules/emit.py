@@ -95,8 +95,13 @@ class EmitTiddler(BaseModule):
             link = src.as_uri()
             html = build_video_html(ctx.title, video_url=link)
 
+        links = [f"[{ctx.title}]({link})"]
+        slides_pdf = (getattr(ctx, "extra_fields", {}) or {}).get("slides-pdf")
+        if slides_pdf:
+            links.append(
+                f"[Slides PDF]({(ctx.workdir / slides_pdf).resolve().as_uri()})")
         body = ctx.summary or ctx.transcript or ctx.description
-        text = f"{{{{{html_title}}}}}\n\n[{ctx.title}]({link})\n\n{body}"
+        text = f"{{{{{html_title}}}}}\n\n" + " · ".join(links) + f"\n\n{body}"
 
         tiddler = {
             "title": title,

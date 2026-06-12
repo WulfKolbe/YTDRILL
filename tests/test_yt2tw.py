@@ -137,10 +137,15 @@ def test_emit_two_tiddlers_local():
     ctx.summary = "# S"
     ctx.bibkey = "locdeadbeef42"
     ctx.video_path = Path("/data/My Lecture.mkv")
+    ctx.extra_fields = {"slides-pdf": "locdeadbeef42_slides.pdf"}
     EmitTiddler(cfg).run(ctx)
     data = json.loads(ctx.output_path.read_text())
     assert len(data) == 2
     assert data[0]["text"].startswith("{{locdeadbeef42_html_0001}}")
+    # summary links BOTH the video and the slides PDF before the markdown
+    assert "file:///data/My%20Lecture.mkv" in data[0]["text"]
+    assert "locdeadbeef42_slides.pdf)" in data[0]["text"]
+    assert "\n\n# S" in data[0]["text"]
     assert "<video" in data[1]["text"]
     assert "file:///data/My%20Lecture.mkv" in data[1]["text"]
 

@@ -26,13 +26,25 @@ for tiddler in sorted(out.glob("*/*_video_0001.json")):
         mismatched += 1
         continue
     stem = video.with_suffix("")
-    shutil.copy2(tiddler, f"{stem}.tiddler.json")
     summary = tiddler.parent / "summary.md"
     if summary.is_file():
         shutil.copy2(summary, f"{stem}.summary.md")
     pdfs = list(tiddler.parent.glob("*_slides.pdf"))
+    data = json.load(open(tiddler))
     if pdfs:
-        shutil.copy2(pdfs[0], f"{stem}.slides.pdf")
+        sidecar_pdf = Path(f"{stem}.slides.pdf")
+        shutil.copy2(pdfs[0], sidecar_pdf)
+        # slides link in the tiddler points at the workdir; retarget it
+        # (and the slides-pdf field) to the sidecar next to the video
+        old_uri = pdfs[0].resolve().as_uri()
+        for t in data:
+            if "text" in t:
+                t["text"] = t["text"].replace(old_uri,
+                                              sidecar_pdf.resolve().as_uri())
+            if t.get("slides-pdf"):
+                t["slides-pdf"] = sidecar_pdf.name
+    json.dump(data, open(f"{stem}.tiddler.json", "w"),
+              ensure_ascii=False, indent=1)
     copied += 1
 
 todo = [p for s, p in sorted(videos.items())
