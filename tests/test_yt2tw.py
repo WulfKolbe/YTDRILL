@@ -214,6 +214,25 @@ def test_slide_dedupe():
     assert dedupe(frames, max_distance=4) == ["f1", "f2"]
 
 
+def test_hash_thumb_tolerates_bad_input():
+    from yt2tw.modules.slides import hash_thumb
+    assert hash_thumb(b"") is None                       # killed-run leftover
+    assert hash_thumb(b"\x89PNG not a pgm") is None
+    valid = b"P5\n9 8\n255\n" + bytes(range(72))
+    assert isinstance(hash_thumb(valid), int)
+
+
+def test_clean_frame_dir_removes_stale_files():
+    import tempfile
+    from yt2tw.modules.slides import clean_frame_dir
+    d = Path(tempfile.mkdtemp()) / "slide_frames"
+    clean_frame_dir(d)                                   # creates
+    (d / "scene_00015.png").touch()                      # stale 0-byte frame
+    (d / "scene_00015.pdf").touch()                      # stale OCR page
+    clean_frame_dir(d)
+    assert list(d.iterdir()) == []
+
+
 def test_subprocesses_do_not_eat_stdin():
     """Regression: ffmpeg inherited the batch loop's stdin and swallowed
     bytes from the `find -print0` pipe, mangling every following path."""
@@ -289,6 +308,8 @@ if __name__ == "__main__":
                test_env_loader, test_extract_references,
                test_extra_fields_reach_tiddler,
                test_pgm_parse, test_dhash_hamming, test_slide_dedupe,
+               test_hash_thumb_tolerates_bad_input,
+               test_clean_frame_dir_removes_stale_files,
                test_subprocesses_do_not_eat_stdin,
                test_local_sidecar_discovery, test_local_id_deterministic,
                test_bibkey_of_shared_helper, test_emit_bibkey_override):

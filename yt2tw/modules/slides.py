@@ -77,6 +77,26 @@ def hamming(a: int, b: int) -> int:
     return (a ^ b).bit_count()
 
 
+def hash_thumb(pgm: bytes) -> int | None:
+    """dHash of a 9x8 PGM thumbnail; None if the data is empty/garbage
+    (e.g. a truncated frame left behind by an interrupted earlier run)."""
+    if not pgm:
+        return None
+    try:
+        w, h, px = parse_pgm(pgm)
+        return dhash(px, w, h)
+    except ValueError:
+        return None
+
+
+def clean_frame_dir(d: Path) -> None:
+    """Create the frame dir, removing artifacts of interrupted runs —
+    stale frames would otherwise be globbed into the current run."""
+    d.mkdir(exist_ok=True)
+    for f in list(d.glob("*.png")) + list(d.glob("*.pdf")):
+        f.unlink()
+
+
 def dedupe(frames: list[tuple[str, int]], max_distance: int) -> list[str]:
     """Keep a frame only if it differs from EVERY kept frame (slide
     revisits later in the lecture stay dropped, not re-emitted)."""
@@ -116,7 +136,7 @@ class SlideExtract(BaseModule):
         lang = self.cfg.get("ocr_lang", "eng")
 
         frame_dir = ctx.workdir / "slide_frames"
-        frame_dir.mkdir(exist_ok=True)
+        clean_frame_dir(frame_dir)
 
         times = self._extract_candidates(ctx, frame_dir, thr)
         frames = sorted(frame_dir.glob("*.png"))
@@ -131,8 +151,11 @@ class SlideExtract(BaseModule):
             pgm = _run(["ffmpeg", "-v", "error", "-i", str(f),
                         "-vf", "scale=9:8:flags=area,format=gray",
                         "-f", "image2pipe", "-vcodec", "pgm", "-"]).stdout
-            w, h, px = parse_pgm(pgm)
-            hashed.append((f.name, dhash(px, w, h)))
+            hsh = hash_thumb(pgm)
+            if hsh is None:
+                log.warning("    unreadable frame skipped: %s", f.name)
+                continue
+            hashed.append((f.name, hsh))
         keep = dedupe(hashed, dist)[:max_slides]
         if len(keep) == max_slides:
             log.warning("    capped at max_slides=%d", max_slides)
