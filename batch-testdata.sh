@@ -16,8 +16,9 @@ find testdata -name '*.mkv' -print0 | sort -z | while IFS= read -r -d '' f; do
     continue
   fi
   mkdir -p "$d"
+  # </dev/null: children must never read the find-pipe feeding this loop
   if timeout 3600 python3 -m yt2tw --slides --workdir "$d" "$f" \
-       > "$d/run.log" 2>&1; then
+       > "$d/run.log" 2>&1 < /dev/null; then
     echo "OK   [$i/$total] $stem"
   else
     echo "FAIL [$i/$total] $stem (exit $?, see $d/run.log)"

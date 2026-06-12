@@ -91,7 +91,10 @@ def dedupe(frames: list[tuple[str, int]], max_distance: int) -> list[str]:
 
 # -- subprocess plumbing -----------------------------------------------------
 def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=False, **kw)
+    # stdin=DEVNULL: ffmpeg reads stdin for its 'q' key and steals bytes
+    # from a parent's pipe (e.g. a batch loop fed by find -print0)
+    return subprocess.run(cmd, capture_output=True, text=False,
+                          stdin=subprocess.DEVNULL, **kw)
 
 
 class SlideExtract(BaseModule):

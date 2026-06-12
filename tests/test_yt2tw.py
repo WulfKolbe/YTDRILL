@@ -214,6 +214,27 @@ def test_slide_dedupe():
     assert dedupe(frames, max_distance=4) == ["f1", "f2"]
 
 
+def test_subprocesses_do_not_eat_stdin():
+    """Regression: ffmpeg inherited the batch loop's stdin and swallowed
+    bytes from the `find -print0` pipe, mangling every following path."""
+    import os
+    from yt2tw.modules.slides import _run
+    payload = b"testdata/precious next path\0"
+    r, w = os.pipe()
+    os.write(w, payload)
+    os.close(w)
+    saved = os.dup(0)
+    try:
+        os.dup2(r, 0)
+        _run(["cat"])                  # must NOT read the parent's stdin
+        leftover = os.read(0, 1024)
+    finally:
+        os.dup2(saved, 0)
+        os.close(saved)
+        os.close(r)
+    assert leftover == payload, "subprocess consumed parent stdin"
+
+
 def test_local_sidecar_discovery():
     import tempfile
     from yt2tw.modules.local import find_sidecar_subs, pick_sub
@@ -268,6 +289,7 @@ if __name__ == "__main__":
                test_env_loader, test_extract_references,
                test_extra_fields_reach_tiddler,
                test_pgm_parse, test_dhash_hamming, test_slide_dedupe,
+               test_subprocesses_do_not_eat_stdin,
                test_local_sidecar_discovery, test_local_id_deterministic,
                test_bibkey_of_shared_helper, test_emit_bibkey_override):
         fn()

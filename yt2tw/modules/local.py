@@ -99,7 +99,7 @@ class LocalSource(BaseModule):
         r = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "csv=p=0", str(video)],
-            capture_output=True, text=True)
+            capture_output=True, text=True, stdin=subprocess.DEVNULL)
         try:
             return int(float(r.stdout.strip()))
         except ValueError:
