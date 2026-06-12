@@ -52,7 +52,7 @@ SAMPLE_JSON3 = json.dumps({
     ]
 })
 
-AWK = Path("/mnt/user-data/uploads/clean_transcript.awk")
+AWK = Path(__file__).resolve().parent.parent / "legacy" / "clean_transcript.awk"
 
 
 def test_srt_clean():

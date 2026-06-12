@@ -208,7 +208,7 @@ class MediaDownload(BaseModule):
     def run(self, ctx: Context) -> None:
         info = ctx.info or {}
         fmt_audio = self._original_audio_selector(info)
-        fmt = self.cfg.get("format", f"bestvideo*+{fmt_audio}/best")
+        fmt = self.cfg.get("format") or f"bestvideo*+{fmt_audio}/best"
         outtmpl = self.cfg.get("outtmpl", "%(id)s.%(ext)s")
         with _ydl(ctx.workdir, format=fmt,
                   outtmpl={"default": outtmpl},
