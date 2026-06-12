@@ -24,6 +24,7 @@ import hashlib
 import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 from .base import BaseModule, Context, bibkey_of
 
@@ -36,6 +37,36 @@ def tw_now() -> str:
 
 def b2(text: str) -> str:
     return hashlib.blake2b(text.encode("utf-8"), digest_size=16).hexdigest()
+
+
+_HTML_STYLE = """\
+<style>
+  .video-container { position: relative; width: 100%;
+    padding-bottom: 56.25%; /* 16:9 */ height: 0; overflow: hidden; }
+  .video-container video, .video-container iframe { position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%; border-radius: 8px;
+    border: 0; }
+  .title { color: yellow; margin-bottom: 10px; }
+  .video-wrapper { max-width: 100%; }
+</style>"""
+
+
+def build_video_html(title: str, *, youtube_id: str = "",
+                     video_url: str = "") -> str:
+    """HTML body for the video tiddler: YouTube iframe embed when an id
+    is given, plain <video> element for a local/file URL otherwise."""
+    if youtube_id:
+        player = (f'<iframe src="https://www.youtube.com/embed/{youtube_id}"'
+                  f' allowfullscreen loading="lazy"></iframe>')
+    else:
+        player = (f'<video controls preload="metadata">'
+                  f'<source src="{video_url}" type="video/mp4">'
+                  f'Your browser does not support the video tag.</video>')
+    return f"""{_HTML_STYLE}
+<div class="video-wrapper">
+  <h3 class="title">{title}</h3>
+  <div class="video-container">{player}</div>
+</div>"""
 
 
 class EmitTiddler(BaseModule):
@@ -53,6 +84,20 @@ class EmitTiddler(BaseModule):
             tags.append(ctx.channel)
         tags += list(self.cfg.get("extra_tags", []))
 
+        # companion HTML tiddler showing the video itself; the markdown
+        # summary transcludes it and links the source
+        html_title = f"{bibkey}_html_{serial:04d}"
+        if ctx.url.startswith(("http://", "https://")):
+            link = ctx.url
+            html = build_video_html(ctx.title, youtube_id=ctx.video_id)
+        else:
+            src = (ctx.video_path or Path(ctx.url)).resolve()
+            link = src.as_uri()
+            html = build_video_html(ctx.title, video_url=link)
+
+        body = ctx.summary or ctx.transcript or ctx.description
+        text = f"{{{{{html_title}}}}}\n\n[{ctx.title}]({link})\n\n{body}"
+
         tiddler = {
             "title": title,
             "caption": ctx.title,
@@ -60,7 +105,7 @@ class EmitTiddler(BaseModule):
             "modified": now,
             "type": self.cfg.get("text_type", "text/markdown"),
             "tags": " ".join(f"[[{t}]]" for t in tags),
-            "text": ctx.summary or ctx.transcript or ctx.description,
+            "text": text,
 
             # provenance / identity
             "bibkey": bibkey,
@@ -88,7 +133,21 @@ class EmitTiddler(BaseModule):
         # drop empty optional fields to keep the tiddler tidy
         tiddler = {k: v for k, v in tiddler.items() if v != ""}
 
-        ctx.tiddlers = [tiddler]
+        html_tiddler = {
+            "title": html_title,
+            "caption": f"{ctx.title} (video)",
+            "created": now,
+            "modified": now,
+            "type": "text/html",
+            "tags": " ".join(f"[[{t}]]" for t in tags),
+            "text": html,
+            "bibkey": bibkey,
+            "url": ctx.url,
+            "video-id": ctx.video_id,
+        }
+        html_tiddler = {k: v for k, v in html_tiddler.items() if v != ""}
+
+        ctx.tiddlers = [tiddler, html_tiddler]
         out = ctx.workdir / f"{title}.json"
         out.write_text(json.dumps(ctx.tiddlers, ensure_ascii=False, indent=1),
                        encoding="utf-8")

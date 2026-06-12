@@ -98,15 +98,51 @@ def test_emit_tiddler(tmp_path=None):
     EmitTiddler(cfg).run(ctx)
 
     data = json.loads(ctx.output_path.read_text(encoding="utf-8"))
-    assert isinstance(data, list) and len(data) == 1
+    assert isinstance(data, list) and len(data) == 2     # summary + html
     t = data[0]
     assert t["title"] == "ytdQw4w9WgXcQ_video_0001"
     assert t["bibkey"] == "ytdQw4w9WgXcQ"
-    assert t["text"].startswith("# Summary")
+    # summary transcludes the html video tiddler, then links the source
+    assert t["text"].startswith("{{ytdQw4w9WgXcQ_html_0001}}")
+    assert "(https://youtu.be/dQw4w9WgXcQ)" in t["text"]
+    assert "# Summary" in t["text"]
     assert t["transcript-blake2b"] == b2("hello world")
     assert json.loads(t["segments"])[0]["t1"] == 1000
     assert "[[Test Channel]]" in t["tags"]
     assert len(t["created"]) == 17 and t["created"].isdigit()
+
+    h = data[1]
+    assert h["title"] == "ytdQw4w9WgXcQ_html_0001"
+    assert h["type"] == "text/html"
+    assert "youtube.com/embed/dQw4w9WgXcQ" in h["text"]
+    assert h["bibkey"] == "ytdQw4w9WgXcQ"
+
+
+def test_build_video_html():
+    from yt2tw.modules.emit import build_video_html
+    yt = build_video_html("My Title", youtube_id="dQw4w9WgXcQ")
+    assert "youtube.com/embed/dQw4w9WgXcQ" in yt
+    assert "video-container" in yt and "My Title" in yt
+    loc = build_video_html("Local Vid", video_url="file:///x/My Vid.mkv")
+    assert "<video" in loc and "file:///x/My Vid.mkv" in loc
+    assert "video/mp4" in loc
+
+
+def test_emit_two_tiddlers_local():
+    import tempfile
+    tmp = Path(tempfile.mkdtemp())
+    cfg = {"modules": {"emit_tiddler": {}}}
+    ctx = Context(url="/data/My Lecture.mkv", workdir=tmp, config=cfg)
+    ctx.title = "My Lecture"
+    ctx.summary = "# S"
+    ctx.bibkey = "locdeadbeef42"
+    ctx.video_path = Path("/data/My Lecture.mkv")
+    EmitTiddler(cfg).run(ctx)
+    data = json.loads(ctx.output_path.read_text())
+    assert len(data) == 2
+    assert data[0]["text"].startswith("{{locdeadbeef42_html_0001}}")
+    assert "<video" in data[1]["text"]
+    assert "file:///data/My%20Lecture.mkv" in data[1]["text"]
 
 
 
@@ -305,6 +341,7 @@ def test_emit_bibkey_override():
 if __name__ == "__main__":
     for fn in (test_srt_clean, test_srt_matches_awk,
                test_json3_clean, test_emit_tiddler,
+               test_build_video_html, test_emit_two_tiddlers_local,
                test_env_loader, test_extract_references,
                test_extra_fields_reach_tiddler,
                test_pgm_parse, test_dhash_hamming, test_slide_dedupe,
