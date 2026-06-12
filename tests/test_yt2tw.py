@@ -183,11 +183,43 @@ def test_extra_fields_reach_tiddler():
     assert t["bibtex"] == "@misc{x,}" and t["cite-keys"] == "x"
 
 
+def test_pgm_parse():
+    from yt2tw.modules.slides import parse_pgm
+    data = b"P5\n9 8\n255\n" + bytes(range(72))
+    w, h, px = parse_pgm(data)
+    assert (w, h) == (9, 8)
+    assert px == list(range(72))
+
+
+def test_dhash_hamming():
+    from yt2tw.modules.slides import dhash, hamming
+    inc_row = list(range(0, 90, 10))                 # strictly increasing, 9 px
+    inc = inc_row * 8                                # 9x8 gradient
+    dec = inc_row[::-1] * 8
+    h_inc, h_dec = dhash(inc, 9, 8), dhash(dec, 9, 8)
+    assert h_inc == (1 << 64) - 1                    # every neighbour brighter
+    assert h_dec == 0
+    assert hamming(h_inc, h_inc) == 0
+    assert hamming(h_inc, h_dec) == 64
+
+
+def test_slide_dedupe():
+    from yt2tw.modules.slides import dedupe
+    near_dup = 0b111                                 # 3 bits from frame one
+    far = (1 << 64) - 1
+    frames = [("f1", 0), ("f2", near_dup), ("f3", far)]
+    assert dedupe(frames, max_distance=4) == ["f1", "f3"]
+    # a slide revisited later still counts as duplicate of an EARLIER keep
+    frames = [("f1", 0), ("f2", far), ("f3", 0b1)]
+    assert dedupe(frames, max_distance=4) == ["f1", "f2"]
+
+
 if __name__ == "__main__":
     for fn in (test_srt_clean, test_srt_matches_awk,
                test_json3_clean, test_emit_tiddler,
                test_env_loader, test_extract_references,
-               test_extra_fields_reach_tiddler):
+               test_extra_fields_reach_tiddler,
+               test_pgm_parse, test_dhash_hamming, test_slide_dedupe):
         fn()
         print(f"ok  {fn.__name__}")
     print("all tests passed")

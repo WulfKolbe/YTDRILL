@@ -31,6 +31,8 @@ export PERPLEXITY_API_KEY=...        # or configure modules.summarize.secret_cmd
 python -m yt2tw 'https://www.youtube.com/watch?v=...'
 python -m yt2tw --no-summary URL     # skip Sonar; tiddler text = transcript
 python -m yt2tw --media URL          # also download video + ORIGINAL audio
+python -m yt2tw --slides URL         # slide frames -> searchable OCR'd PDF
+                                     # (implies --media; needs ffmpeg/tesseract/gs)
 python -m yt2tw --workdir /tmp/x URL # default is a fresh temp dir (never ~/Downloads)
 ```
 
@@ -67,6 +69,7 @@ pattern); modules communicate only through the shared `Context`:
 | `summarize`   | Perplexity Sonar, triple no-search guard, transcript-first prompt, `prompts/howto.md` template (the original tested `howto.txt`, with the unfilled *Inputs Provided* block removed at the template level instead of via `sed`); optional `## COMMENTS` section when `modules.fetch_info.max_comments > 0` |
 | `extract_references` | parses the `@type{key,...}` BibTeX entries the howto forces into the summary (brace-counting, nested braces safe) and attaches `bibtex` + `cite-keys` tiddler fields via the additive `ctx.extra_fields` contract — the direct pdfdrill handoff |
 | `media`       | *(optional, `--media`)* video + **original** audio stream (`language_preference`/`format_note=original` pinning) — prep for slide isolation |
+| `slides`      | *(optional, `--slides`)* license-clean vid2slides replacement: ffmpeg scene-change frames + chapter marks → dHash dedupe (stdlib PGM parse, no new Python deps) → per-frame Tesseract OCR → Ghostscript merge into `<bibkey>_slides.pdf`; attaches `slides-pdf` + `slide-times` fields — the PDF is the pdfdrill handoff |
 | `emit_tiddler`| single-tiddler TW JSON array, `$Bibkey_$type_$serial` naming     |
 
 ## Tiddler schema

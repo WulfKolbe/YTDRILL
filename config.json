@@ -23,6 +23,12 @@
       "format": "",
       "outtmpl": "%(id)s.%(ext)s"
     },
+    "slides": {
+      "scene_threshold": 0.04,
+      "hash_distance": 8,
+      "max_slides": 200,
+      "ocr_lang": "eng"
+    },
     "emit_tiddler": {
       "tiddler_type": "video",
       "text_type": "text/markdown",

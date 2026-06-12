@@ -18,6 +18,7 @@ from .env import load_env
 from .modules.base import Context, load_config, run_pipeline
 from .modules.yt import FetchInfo, Transcript, MediaDownload
 from .modules.references import ExtractReferences
+from .modules.slides import SlideExtract
 from .modules.summarize import Summarize
 from .modules.emit import EmitTiddler
 
@@ -25,6 +26,7 @@ REGISTRY = {
     "fetch_info": FetchInfo,
     "transcript": Transcript,
     "media": MediaDownload,
+    "slides": SlideExtract,
     "summarize": Summarize,
     "extract_references": ExtractReferences,
     "emit_tiddler": EmitTiddler,
@@ -56,6 +58,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="skip Perplexity; tiddler text falls back to transcript")
     ap.add_argument("--media", action="store_true",
                     help="also download video + original audio (slide isolation prep)")
+    ap.add_argument("--slides", action="store_true",
+                    help="extract slide frames to a searchable OCR'd PDF "
+                         "for pdfdrill (implies --media)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
 
@@ -71,9 +76,11 @@ def main(argv: list[str] | None = None) -> int:
     proc = list(config.get("procOrder", DEFAULT_CONFIG["procOrder"]))
     if args.no_summary:
         proc = [m for m in proc if m not in ("summarize", "extract_references")]
-    if args.media and "media" not in proc:
+    if (args.media or args.slides) and "media" not in proc:
         proc.insert(proc.index("emit_tiddler") if "emit_tiddler" in proc else len(proc),
                     "media")
+    if args.slides and "slides" not in proc:
+        proc.insert(proc.index("media") + 1, "slides")
     config["procOrder"] = proc
 
     workdir = Path(args.workdir) if args.workdir \
