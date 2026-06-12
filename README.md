@@ -34,6 +34,9 @@ python -m yt2tw --media URL          # also download video + ORIGINAL audio
 python -m yt2tw --slides URL         # slide frames -> searchable OCR'd PDF
                                      # (implies --media; needs ffmpeg/tesseract/gs)
 python -m yt2tw --workdir /tmp/x URL # default is a fresh temp dir (never ~/Downloads)
+python -m yt2tw /path/to/video.mkv   # LOCAL file (e.g. 4K Video Downloader+ export):
+                                     # transcript from sidecar <stem>.<lang>.srt,
+                                     # --slides works directly on the file
 ```
 
 The path of the emitted `<bibkey>_video_0001.json` is printed on stdout, so it
@@ -65,6 +68,7 @@ pattern); modules communicate only through the shared `Context`:
 | module        | does                                                            |
 |---------------|-----------------------------------------------------------------|
 | `fetch_info`  | single `yt_dlp.extract_info(download=False)`; caches info dict   |
+| `local_source`| *(local files)* replaces fetch_info+transcript+media: metadata via ffprobe, transcript from sidecar `<stem>.<lang>.srt` (`lang_priority` config), bibkey `loc<blake2b(stem)[:11]>`, video ready for `slides` |
 | `transcript`  | picks original-language track (manual > `*-orig` auto > auto), json3 > srt/vtt; emits plain text **and** timed segments |
 | `summarize`   | Perplexity Sonar, triple no-search guard, transcript-first prompt, `prompts/howto.md` template (the original tested `howto.txt`, with the unfilled *Inputs Provided* block removed at the template level instead of via `sed`); optional `## COMMENTS` section when `modules.fetch_info.max_comments > 0` |
 | `extract_references` | parses the `@type{key,...}` BibTeX entries the howto forces into the summary (brace-counting, nested braces safe) and attaches `bibtex` + `cite-keys` tiddler fields via the additive `ctx.extra_fields` contract — the direct pdfdrill handoff |

@@ -214,12 +214,62 @@ def test_slide_dedupe():
     assert dedupe(frames, max_distance=4) == ["f1", "f2"]
 
 
+def test_local_sidecar_discovery():
+    import tempfile
+    from yt2tw.modules.local import find_sidecar_subs, pick_sub
+    d = Path(tempfile.mkdtemp())
+    video = d / "My Lecture (Part 1).mkv"
+    video.touch()
+    (d / "My Lecture (Part 1).en.srt").touch()
+    (d / "My Lecture (Part 1).de.srt").touch()
+    (d / "My Lecture (Part 1).srt").touch()
+    (d / "Other Video.en.srt").touch()           # different stem: excluded
+    subs = find_sidecar_subs(video)
+    assert sorted(subs) == ["", "de", "en"]
+    assert pick_sub(subs, ["en", "de"])[0] == "en"
+    assert pick_sub(subs, ["fr", "de"])[0] == "de"
+    assert pick_sub(subs, ["fr"])[0] in ("", "de", "en")   # fallback: any
+    assert pick_sub({}, ["en"]) is None
+
+
+def test_local_id_deterministic():
+    from yt2tw.modules.local import local_id
+    a, b = local_id("My Lecture"), local_id("My Lecture")
+    assert a == b and len(a) == 11
+    assert local_id("Other") != a
+
+
+def test_bibkey_of_shared_helper():
+    import tempfile
+    from yt2tw.modules.base import bibkey_of
+    ctx = Context(url="u", workdir=Path(tempfile.mkdtemp()), config={})
+    ctx.video_id = "abc123"
+    assert bibkey_of(ctx) == "ytabc123"
+    ctx.bibkey = "locdeadbeef42"
+    assert bibkey_of(ctx) == "locdeadbeef42"   # slides PDF must match tiddler
+
+
+def test_emit_bibkey_override():
+    import tempfile
+    cfg = {"modules": {"emit_tiddler": {}}}
+    ctx = Context(url="u", workdir=Path(tempfile.mkdtemp()), config=cfg)
+    ctx.title = "T"
+    ctx.summary = "s"
+    ctx.bibkey = "locAbCdEf12345"
+    EmitTiddler(cfg).run(ctx)
+    t = json.loads(ctx.output_path.read_text())[0]
+    assert t["title"] == "locAbCdEf12345_video_0001"
+    assert t["bibkey"] == "locAbCdEf12345"
+
+
 if __name__ == "__main__":
     for fn in (test_srt_clean, test_srt_matches_awk,
                test_json3_clean, test_emit_tiddler,
                test_env_loader, test_extract_references,
                test_extra_fields_reach_tiddler,
-               test_pgm_parse, test_dhash_hamming, test_slide_dedupe):
+               test_pgm_parse, test_dhash_hamming, test_slide_dedupe,
+               test_local_sidecar_discovery, test_local_id_deterministic,
+               test_bibkey_of_shared_helper, test_emit_bibkey_override):
         fn()
         print(f"ok  {fn.__name__}")
     print("all tests passed")

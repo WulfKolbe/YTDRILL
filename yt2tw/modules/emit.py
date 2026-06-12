@@ -25,7 +25,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from .base import BaseModule, Context
+from .base import BaseModule, Context, bibkey_of
 
 log = logging.getLogger("yt2tw")
 
@@ -42,7 +42,7 @@ class EmitTiddler(BaseModule):
     name = "emit_tiddler"
 
     def run(self, ctx: Context) -> None:
-        bibkey = f"yt{ctx.video_id}"
+        bibkey = bibkey_of(ctx)
         ttype = self.cfg.get("tiddler_type", "video")
         serial = int(self.cfg.get("serial", 1))
         title = f"{bibkey}_{ttype}_{serial:04d}"

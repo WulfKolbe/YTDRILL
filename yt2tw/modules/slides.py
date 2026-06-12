@@ -30,7 +30,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .base import BaseModule, Context
+from .base import BaseModule, Context, bibkey_of
 
 log = logging.getLogger("yt2tw")
 
@@ -149,8 +149,7 @@ class SlideExtract(BaseModule):
             log.warning("    no OCR'd pages produced")
             return
 
-        bibkey = f"yt{ctx.video_id}"
-        out = ctx.workdir / f"{bibkey}_slides.pdf"
+        out = ctx.workdir / f"{bibkey_of(ctx)}_slides.pdf"
         r = _run(["gs", "-dBATCH", "-dNOPAUSE", "-q",
                   "-sDEVICE=pdfwrite", f"-sOutputFile={out}",
                   *map(str, pdfs)])

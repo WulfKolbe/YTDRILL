@@ -17,6 +17,7 @@ from pathlib import Path
 from .env import load_env
 from .modules.base import Context, load_config, run_pipeline
 from .modules.yt import FetchInfo, Transcript, MediaDownload
+from .modules.local import LocalSource
 from .modules.references import ExtractReferences
 from .modules.slides import SlideExtract
 from .modules.summarize import Summarize
@@ -25,6 +26,7 @@ from .modules.emit import EmitTiddler
 REGISTRY = {
     "fetch_info": FetchInfo,
     "transcript": Transcript,
+    "local_source": LocalSource,
     "media": MediaDownload,
     "slides": SlideExtract,
     "summarize": Summarize,
@@ -47,7 +49,9 @@ DEFAULT_CONFIG = {
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="yt2tw")
-    ap.add_argument("url")
+    ap.add_argument("url",
+                    help="YouTube URL, or path to a local video file "
+                         "(sidecar <stem>.<lang>.srt is used as transcript)")
     ap.add_argument("--workdir", default=None,
                     help="working directory (default: temp dir, NOT ~/Downloads)")
     ap.add_argument("--config", default=None, help="path to config.json")
@@ -73,14 +77,22 @@ def main(argv: list[str] | None = None) -> int:
         default = Path(__file__).parents[1] / "config.json"
         config = load_config(default) if default.is_file() else dict(DEFAULT_CONFIG)
 
+    is_local = Path(args.url).expanduser().is_file()
+
     proc = list(config.get("procOrder", DEFAULT_CONFIG["procOrder"]))
     if args.no_summary:
         proc = [m for m in proc if m not in ("summarize", "extract_references")]
-    if (args.media or args.slides) and "media" not in proc:
+    if is_local:
+        # one stage replaces fetch_info+transcript+media: metadata from the
+        # file, transcript from the sidecar .srt, video already on disk
+        proc = ["local_source" if m == "fetch_info" else m
+                for m in proc if m not in ("transcript", "media")]
+    elif (args.media or args.slides) and "media" not in proc:
         proc.insert(proc.index("emit_tiddler") if "emit_tiddler" in proc else len(proc),
                     "media")
     if args.slides and "slides" not in proc:
-        proc.insert(proc.index("media") + 1, "slides")
+        anchor = "media" if "media" in proc else "local_source"
+        proc.insert(proc.index(anchor) + 1, "slides")
     config["procOrder"] = proc
 
     workdir = Path(args.workdir) if args.workdir \

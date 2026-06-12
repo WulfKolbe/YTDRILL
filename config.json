@@ -23,6 +23,9 @@
       "format": "",
       "outtmpl": "%(id)s.%(ext)s"
     },
+    "local_source": {
+      "lang_priority": ["en", "de", ""]
+    },
     "slides": {
       "scene_threshold": 0.04,
       "hash_distance": 8,

@@ -66,6 +66,13 @@ class BaseModule:
         raise NotImplementedError
 
 
+def bibkey_of(ctx: Context) -> str:
+    """Tiddler/artifact bibkey: local_source's override, else yt<video_id>.
+    Every module that names output files MUST use this so the slides PDF,
+    info.json and tiddler title stay consistent for pdfdrill."""
+    return getattr(ctx, "bibkey", None) or f"yt{ctx.video_id}"
+
+
 def load_config(path: Path) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as fh:
         return json.load(fh)
