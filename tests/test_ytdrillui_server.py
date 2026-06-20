@@ -45,9 +45,16 @@ class _FakeTranscript:
         ctx.segments = [{"t0": 0, "t1": 1000, "text": "hello world"}]
 
 
+class _Noop:
+    def __init__(self, cfg): pass
+    def run(self, ctx): pass
+
+
 def test_ws_run_writes_pdfdrill_sidecar(tmp_path, monkeypatch):
+    # run_plan always finishes at emit_tiddler; target=transcript → no summary
     monkeypatch.setattr(SRV, "REGISTRY",
-                        {"fetch_info": _FakeFetch, "transcript": _FakeTranscript})
+                        {"fetch_info": _FakeFetch, "transcript": _FakeTranscript,
+                         "emit_tiddler": _Noop})
     monkeypatch.setattr(SRV, "_config",
                         lambda: {"procOrder": ["fetch_info", "transcript"],
                                  "modules": {}})
@@ -79,10 +86,10 @@ def test_ws_run_writes_pdfdrill_sidecar(tmp_path, monkeypatch):
             kinds = [m["type"] for m in msgs]
             assert "started" in kinds
             assert "done" in kinds, f"no done; got {msgs}"
-            # streamed a done event per stage
+            # run_plan runs fetch_info → transcript → emit_tiddler (no summary)
             done_stages = [m["node"] for m in msgs
                            if m["type"] == "stage" and m["phase"] == "done"]
-            assert done_stages == ["fetch_info", "transcript"]
+            assert done_stages == ["fetch_info", "transcript", "emit_tiddler"]
 
             done = next(m for m in msgs if m["type"] == "done")
             assert done["bibkey"] == "yttestid12345"
@@ -95,7 +102,7 @@ def test_ws_run_writes_pdfdrill_sidecar(tmp_path, monkeypatch):
 
     # the PDFDRILL-compatible artifacts are really on disk
     d = json.loads((tmp_path / "yttestid12345.drill.json").read_text())
-    assert d["facts"] == ["INFO_FETCHED", "TRANSCRIPT_BUILT"]
+    assert d["facts"] == ["INFO_FETCHED", "TRANSCRIPT_BUILT", "TIDDLERS_BUILT"]
     assert d["evidence"]["video_id"] == "testid12345"
     assert (tmp_path / "yttestid12345.drill" / "model.docmodel.json").is_file()
 
@@ -110,10 +117,12 @@ class _FakeSummarize:
 def test_ws_run_surfaces_markdown_summary(tmp_path, monkeypatch):
     monkeypatch.setattr(SRV, "REGISTRY",
                         {"fetch_info": _FakeFetch, "transcript": _FakeTranscript,
-                         "summarize": _FakeSummarize})
+                         "summarize": _FakeSummarize, "extract_references": _Noop,
+                         "emit_tiddler": _Noop})
     monkeypatch.setattr(SRV, "_config",
                         lambda: {"procOrder": ["fetch_info", "transcript",
-                                               "summarize"], "modules": {}})
+                                               "summarize", "extract_references",
+                                               "emit_tiddler"], "modules": {}})
 
     async def body():
         app = SRV.make_app(tmp_path)

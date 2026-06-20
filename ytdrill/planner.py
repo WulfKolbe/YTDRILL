@@ -36,7 +36,7 @@ from .stagerun import _detail
 
 def run_plan(ctx: Context, registry: dict[str, type], *, is_local: bool,
              want_summary: bool = True, want_slides: bool = False,
-             want_media: bool = False,
+             want_media: bool = False, want_asr: bool = True,
              on_event: Callable[[str, dict], None] | None = None) -> list[dict]:
     """Run the lazy escalation and return stage records ``[{node, cost_ms,
     detail}]``. Composes the orthogonal options (summary × slides) and inserts
@@ -50,6 +50,11 @@ def run_plan(ctx: Context, registry: dict[str, type], *, is_local: bool,
                  a local file is already the video)
       slides   — ``slides`` when ``want_slides``
       emit     — ``emit_tiddler`` always
+
+    ``want_asr=False`` disables the audio+Whisper fallback entirely: a URL with
+    no captions then yields no transcript (and so no summary) rather than
+    downloading and transcribing — the server's "summary from the first layers
+    only, no Whisper" mode.
 
     ``on_event(kind, payload)`` brackets each stage with ``"start"``/``"done"``.
     """
@@ -75,7 +80,7 @@ def run_plan(ctx: Context, registry: dict[str, type], *, is_local: bool,
     else:
         run_one("fetch_info")            # cheap metadata, no download
         run_one("transcript")            # free captions, the normal source
-        if not ctx.transcript:           # lazy fallback: download audio, then Whisper it
+        if not ctx.transcript and want_asr:   # lazy fallback: download audio, then Whisper it
             run_one("audio")
             run_one("asr")
 

@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ytdrill.cli import REGISTRY, DEFAULT_CONFIG                    # noqa: E402
 from ytdrill.modules.base import Context, load_config, bibkey_of   # noqa: E402
 from ytdrill.env import load_env                                   # noqa: E402
-from ytdrill.stagerun import run_to                                # noqa: E402
+from ytdrill.planner import run_plan                               # noqa: E402
 from ytdrill.drillsidecar import emit_sidecar                      # noqa: E402
 
 HTML_PATH = Path(__file__).resolve().parent / "ytdrillui.html"
@@ -48,26 +48,38 @@ def _order(config: dict) -> list[str]:
     return list(config.get("procOrder", DEFAULT_CONFIG["procOrder"]))
 
 
-def _adjust_for_local(url: str, order: list[str]) -> list[str]:
-    """Local file: local_source replaces fetch_info; drop the YT-only stages
-    (mirrors ytdrill/cli.py so the WS tool handles local videos too)."""
-    if not Path(url).expanduser().is_file():
-        return order
-    return ["local_source" if m == "fetch_info" else m
-            for m in order if m not in ("transcript", "media")]
+def _wants(target: str) -> dict:
+    """Map the UI's chosen target stage to run_plan features. The summary (with
+    its References) is produced once the run reaches `summarize`; the default
+    target is the last stage, so a plain Run gives the full summary."""
+    return {
+        "want_summary": target in ("summarize", "extract_references", "emit_tiddler"),
+        "want_slides": target == "slides",
+    }
 
 
 def _run_pipeline(url: str, target: str, outdir: Path, emit) -> dict:
-    """Blocking: build a Context, run the prefix up to `target`, emit sidecar.
-    Returns a JSON-able result dict. Runs in a worker thread."""
+    """Blocking: build a Context, run the lazy plan for `target`, emit sidecar.
+    Returns a JSON-able result dict. Runs in a worker thread.
+
+    Uses ``ytdrill.planner.run_plan`` with ``want_asr=False`` — only the first
+    layers (info → transcript → summarize → references) that produce the summary
+    with references; no audio download, no Whisper, no video.
+    """
     config = _config()
-    order = _adjust_for_local(url, _order(config))
-    config["procOrder"] = order
+    order = _order(config)
+    if target not in order:
+        raise ValueError(f"unknown target stage {target!r}; "
+                         f"known: {', '.join(order)}")
     outdir.mkdir(parents=True, exist_ok=True)
     load_env(search=[outdir, REPO_ROOT, Path.cwd()])
 
+    is_local = Path(url).expanduser().is_file()
     ctx = Context(url=url, workdir=outdir, config=config)
-    stages = run_to(ctx, REGISTRY, target=target, order=order, on_event=emit)
+    w = _wants(target)
+    stages = run_plan(ctx, REGISTRY, is_local=is_local,
+                      want_summary=w["want_summary"], want_slides=w["want_slides"],
+                      want_asr=False, on_event=emit)
     sidecar = emit_sidecar(ctx, stages=stages)
 
     bibkey = bibkey_of(ctx)

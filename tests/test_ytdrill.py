@@ -395,6 +395,15 @@ def test_run_plan_lazy_and_composable():
     assert ran[:4] == ["fetch_info", "transcript", "audio", "asr"]
     assert "video" not in ran
 
+    # URL + NO captions but want_asr=False → no audio/asr at all
+    # (the server's "summary from the first layers only, no Whisper" mode)
+    ran.clear()
+    run_plan(fresh(), _plan_reg(ran, captions=False),
+             is_local=False, want_summary=True, want_slides=False, want_asr=False)
+    assert "audio" not in ran and "asr" not in ran
+    assert ran == ["fetch_info", "transcript", "summarize",
+                   "extract_references", "emit_tiddler"]
+
     # URL --slides keeps the summary AND fetches video before the OCR stage
     ran.clear()
     run_plan(fresh(), _plan_reg(ran, captions=True),
