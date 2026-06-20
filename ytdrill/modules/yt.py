@@ -18,7 +18,7 @@ from pathlib import Path
 from .base import BaseModule, Context
 from ..clean import clean_json3, clean_srt
 
-log = logging.getLogger("yt2tw")
+log = logging.getLogger("ytdrill")
 
 
 def _ydl(workdir: Path, **extra):
@@ -163,12 +163,12 @@ class Transcript(BaseModule):
     def _download(url: str, retries: int = 5) -> str:
         """GET with backoff — YouTube's timedtext endpoint 429s readily
         (the bash version used `--retries 5` for the same reason).
-        YT2TW_INSECURE_SSL=1 disables verification for MITM-proxied
+        YTDRILL_INSECURE_SSL=1 disables verification for MITM-proxied
         sandboxes only; never set it on a normal machine."""
         import ssl
         import time
         ctx_ssl = None
-        if os.environ.get("YT2TW_INSECURE_SSL"):
+        if os.environ.get("YTDRILL_INSECURE_SSL"):
             ctx_ssl = ssl.create_default_context()
             ctx_ssl.check_hostname = False
             ctx_ssl.verify_mode = ssl.CERT_NONE

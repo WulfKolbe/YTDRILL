@@ -27,7 +27,7 @@ from pathlib import Path
 from .base import BaseModule, Context
 from ..clean import clean_srt
 
-log = logging.getLogger("yt2tw")
+log = logging.getLogger("ytdrill")
 
 
 # -- pure helpers (unit-tested) ---------------------------------------------

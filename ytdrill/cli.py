@@ -1,7 +1,7 @@
-"""yt2tw CLI.
+"""ytdrill CLI.
 
 Usage:
-    python -m yt2tw <youtube-url> [--workdir DIR] [--config config.json]
+    python -m ytdrill <youtube-url> [--workdir DIR] [--config config.json]
                     [--no-summary] [--media]
 
 Exit codes: 0 ok, 1 runtime failure, 2 config error.
@@ -48,7 +48,7 @@ DEFAULT_CONFIG = {
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="yt2tw")
+    ap = argparse.ArgumentParser(prog="ytdrill")
     ap.add_argument("url",
                     help="YouTube URL, or path to a local video file "
                          "(sidecar <stem>.<lang>.srt is used as transcript)")
@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     config["procOrder"] = proc
 
     workdir = Path(args.workdir) if args.workdir \
-        else Path(tempfile.mkdtemp(prefix="yt2tw."))
+        else Path(tempfile.mkdtemp(prefix="ytdrill."))
     workdir.mkdir(parents=True, exist_ok=True)
 
     load_env(Path(args.env) if args.env else None,

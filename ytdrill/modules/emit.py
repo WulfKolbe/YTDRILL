@@ -28,7 +28,7 @@ from pathlib import Path
 
 from .base import BaseModule, Context, bibkey_of
 
-log = logging.getLogger("yt2tw")
+log = logging.getLogger("ytdrill")
 
 
 def tw_now() -> str:
@@ -79,7 +79,7 @@ class EmitTiddler(BaseModule):
         title = f"{bibkey}_{ttype}_{serial:04d}"
         now = tw_now()
 
-        tags = ["YouTube", "yt2tw"]
+        tags = ["YouTube", "ytdrill"]
         if ctx.channel:
             tags.append(ctx.channel)
         tags += list(self.cfg.get("extra_tags", []))

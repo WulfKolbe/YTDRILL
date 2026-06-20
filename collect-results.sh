@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copy yt2tw batch results next to the original videos as sidecar files:
+# Copy ytdrill batch results next to the original videos as sidecar files:
 #   <stem>.tiddler.json   TiddlyWiki import file
 #   <stem>.summary.md     Sonar summary (only when a transcript existed)
 #   <stem>.slides.pdf     searchable OCR'd slide deck

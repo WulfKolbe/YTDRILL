@@ -22,7 +22,7 @@ import re
 
 from .base import BaseModule, Context
 
-log = logging.getLogger("yt2tw")
+log = logging.getLogger("ytdrill")
 
 _HEAD = re.compile(r"@([A-Za-z]+)\s*\{\s*([^,\s]+)\s*,")
 

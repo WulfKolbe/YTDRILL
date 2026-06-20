@@ -16,7 +16,7 @@ import os
 import re
 from pathlib import Path
 
-log = logging.getLogger("yt2tw")
+log = logging.getLogger("ytdrill")
 
 _LINE = re.compile(r"""^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$""")
 

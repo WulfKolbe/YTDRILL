@@ -1,6 +1,9 @@
-# yt2tw
+# ytdrill
 
 YouTube → cleaned transcript → Perplexity Sonar summary → **TiddlyWiki JSON tiddler**.
+
+(Formerly `yt2tw`; the project, repo and Python package were renamed to
+`ytdrill`. The CLI is now `python -m ytdrill`.)
 
 Python rewrite of the original `yt2tw.sh` + `clean_transcript.awk` pipeline,
 using `yt_dlp` as a library instead of shelling out. Output of step 1 is a
@@ -16,7 +19,7 @@ YouTube's native **json3** format when available: no rolling-caption
 duplication to clean, and per-segment timestamps are preserved (needed later
 for slide/beamer alignment). The SRT/VTT path remains as a fallback through a
 Python port of `clean_transcript.awk`, verified **byte-identical** against the
-gawk reference (`tests/test_yt2tw.py::test_srt_matches_awk`).
+gawk reference (`tests/test_ytdrill.py::test_srt_matches_awk`).
 
 ## Install
 
@@ -28,13 +31,13 @@ pip install yt-dlp        # only non-stdlib dependency
 
 ```sh
 export PERPLEXITY_API_KEY=...        # or configure modules.summarize.secret_cmd
-python -m yt2tw 'https://www.youtube.com/watch?v=...'
-python -m yt2tw --no-summary URL     # skip Sonar; tiddler text = transcript
-python -m yt2tw --media URL          # also download video + ORIGINAL audio
-python -m yt2tw --slides URL         # slide frames -> searchable OCR'd PDF
+python -m ytdrill 'https://www.youtube.com/watch?v=...'
+python -m ytdrill --no-summary URL     # skip Sonar; tiddler text = transcript
+python -m ytdrill --media URL          # also download video + ORIGINAL audio
+python -m ytdrill --slides URL         # slide frames -> searchable OCR'd PDF
                                      # (implies --media; needs ffmpeg/tesseract/gs)
-python -m yt2tw --workdir /tmp/x URL # default is a fresh temp dir (never ~/Downloads)
-python -m yt2tw /path/to/video.mkv   # LOCAL file (e.g. 4K Video Downloader+ export):
+python -m ytdrill --workdir /tmp/x URL # default is a fresh temp dir (never ~/Downloads)
+python -m ytdrill /path/to/video.mkv   # LOCAL file (e.g. 4K Video Downloader+ export):
                                      # transcript from sidecar <stem>.<lang>.srt,
                                      # --slides works directly on the file
 ```
@@ -43,7 +46,7 @@ The path of the emitted `<bibkey>_video_0001.json` is printed on stdout, so it
 composes with `tw.py`:
 
 ```sh
-python -m yt2tw --no-summary URL | xargs -I{} tw.py import {}
+python -m ytdrill --no-summary URL | xargs -I{} tw.py import {}
 ```
 
 ## Secrets — IMPORTANT
@@ -54,7 +57,7 @@ python -m yt2tw --no-summary URL | xargs -I{} tw.py import {}
 2. `.env` file — `cp .env.example .env` and fill in; search order is
    `--env PATH` > workdir > project root > cwd. `.env` and `.env.*` are
    gitignored (only `.env.example` is tracked); parser is stdlib
-   (`yt2tw/env.py`), no python-dotenv dependency.
+   (`ytdrill/env.py`), no python-dotenv dependency.
 3. `modules.summarize.secret_cmd` in `config.json`, e.g. `apivault get perplexity`
 
 The key that was hardcoded in the original `yt2tw.sh` must be considered
@@ -100,7 +103,7 @@ description drift without diffing text.
 ## Sandbox / proxied environments
 
 Behind a MITM proxy set `modules.fetch_info.nocheckcertificate: true` and
-`YT2TW_INSECURE_SSL=1` for the caption fetch. Leave both OFF on a normal
+`YTDRILL_INSECURE_SSL=1` for the caption fetch. Leave both OFF on a normal
 machine. Note: YouTube's timedtext endpoint aggressively 429s datacenter
 IPs regardless of client — run from a residential connection, optionally
 with `modules.fetch_info.cookiesfrombrowser: "firefox"`.
@@ -108,7 +111,7 @@ with `modules.fetch_info.cookiesfrombrowser: "firefox"`.
 ## Tests
 
 ```sh
-python tests/test_yt2tw.py      # includes gawk reference-equivalence check
+python tests/test_ytdrill.py      # includes gawk reference-equivalence check
 ```
 
 ## Legacy

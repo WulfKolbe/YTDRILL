@@ -1,4 +1,4 @@
-"""Tests for yt2tw. Run: python -m pytest tests/ -q  (or python tests/test_yt2tw.py)
+"""Tests for ytdrill. Run: python -m pytest tests/ -q  (or python tests/test_ytdrill.py)
 
 test_srt_matches_awk additionally executes the ORIGINAL clean_transcript.awk
 (if gawk + the script are available) and asserts byte-identical plain-text
@@ -14,9 +14,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-from yt2tw.clean import clean_srt, clean_json3            # noqa: E402
-from yt2tw.modules.emit import EmitTiddler, tw_now, b2    # noqa: E402
-from yt2tw.modules.base import Context                    # noqa: E402
+from ytdrill.clean import clean_srt, clean_json3            # noqa: E402
+from ytdrill.modules.emit import EmitTiddler, tw_now, b2    # noqa: E402
+from ytdrill.modules.base import Context                    # noqa: E402
 
 SAMPLE_SRT = """\
 1
@@ -109,6 +109,7 @@ def test_emit_tiddler(tmp_path=None):
     assert t["transcript-blake2b"] == b2("hello world")
     assert json.loads(t["segments"])[0]["t1"] == 1000
     assert "[[Test Channel]]" in t["tags"]
+    assert "[[ytdrill]]" in t["tags"] and "[[yt2tw]]" not in t["tags"]
     assert len(t["created"]) == 17 and t["created"].isdigit()
 
     h = data[1]
@@ -119,7 +120,7 @@ def test_emit_tiddler(tmp_path=None):
 
 
 def test_build_video_html():
-    from yt2tw.modules.emit import build_video_html
+    from ytdrill.modules.emit import build_video_html
     yt = build_video_html("My Title", youtube_id="dQw4w9WgXcQ")
     assert "youtube.com/embed/dQw4w9WgXcQ" in yt
     assert "video-container" in yt and "My Title" in yt
@@ -157,7 +158,7 @@ def test_emit_two_tiddlers_local():
 def test_env_loader():
     import os
     import tempfile
-    from yt2tw.env import parse_env, load_env
+    from ytdrill.env import parse_env, load_env
     text = """
 # comment
 export PERPLEXITY_API_KEY="pplx-abc123"
@@ -178,7 +179,7 @@ BROKEN LINE IGNORED
 
 
 def test_extract_references():
-    from yt2tw.modules.references import extract_bibtex, ExtractReferences
+    from ytdrill.modules.references import extract_bibtex, ExtractReferences
     summary = r"""
 Text with \cite{sciama1953}.
 
@@ -225,7 +226,7 @@ def test_extra_fields_reach_tiddler():
 
 
 def test_pgm_parse():
-    from yt2tw.modules.slides import parse_pgm
+    from ytdrill.modules.slides import parse_pgm
     data = b"P5\n9 8\n255\n" + bytes(range(72))
     w, h, px = parse_pgm(data)
     assert (w, h) == (9, 8)
@@ -233,7 +234,7 @@ def test_pgm_parse():
 
 
 def test_dhash_hamming():
-    from yt2tw.modules.slides import dhash, hamming
+    from ytdrill.modules.slides import dhash, hamming
     inc_row = list(range(0, 90, 10))                 # strictly increasing, 9 px
     inc = inc_row * 8                                # 9x8 gradient
     dec = inc_row[::-1] * 8
@@ -245,7 +246,7 @@ def test_dhash_hamming():
 
 
 def test_slide_dedupe():
-    from yt2tw.modules.slides import dedupe
+    from ytdrill.modules.slides import dedupe
     near_dup = 0b111                                 # 3 bits from frame one
     far = (1 << 64) - 1
     frames = [("f1", 0), ("f2", near_dup), ("f3", far)]
@@ -256,7 +257,7 @@ def test_slide_dedupe():
 
 
 def test_hash_thumb_tolerates_bad_input():
-    from yt2tw.modules.slides import hash_thumb
+    from ytdrill.modules.slides import hash_thumb
     assert hash_thumb(b"") is None                       # killed-run leftover
     assert hash_thumb(b"\x89PNG not a pgm") is None
     valid = b"P5\n9 8\n255\n" + bytes(range(72))
@@ -265,7 +266,7 @@ def test_hash_thumb_tolerates_bad_input():
 
 def test_clean_frame_dir_removes_stale_files():
     import tempfile
-    from yt2tw.modules.slides import clean_frame_dir
+    from ytdrill.modules.slides import clean_frame_dir
     d = Path(tempfile.mkdtemp()) / "slide_frames"
     clean_frame_dir(d)                                   # creates
     (d / "scene_00015.png").touch()                      # stale 0-byte frame
@@ -278,7 +279,7 @@ def test_subprocesses_do_not_eat_stdin():
     """Regression: ffmpeg inherited the batch loop's stdin and swallowed
     bytes from the `find -print0` pipe, mangling every following path."""
     import os
-    from yt2tw.modules.slides import _run
+    from ytdrill.modules.slides import _run
     payload = b"testdata/precious next path\0"
     r, w = os.pipe()
     os.write(w, payload)
@@ -297,7 +298,7 @@ def test_subprocesses_do_not_eat_stdin():
 
 def test_local_sidecar_discovery():
     import tempfile
-    from yt2tw.modules.local import find_sidecar_subs, pick_sub
+    from ytdrill.modules.local import find_sidecar_subs, pick_sub
     d = Path(tempfile.mkdtemp())
     video = d / "My Lecture (Part 1).mkv"
     video.touch()
@@ -314,7 +315,7 @@ def test_local_sidecar_discovery():
 
 
 def test_local_id_deterministic():
-    from yt2tw.modules.local import local_id
+    from ytdrill.modules.local import local_id
     a, b = local_id("My Lecture"), local_id("My Lecture")
     assert a == b and len(a) == 11
     assert local_id("Other") != a
@@ -322,7 +323,7 @@ def test_local_id_deterministic():
 
 def test_bibkey_of_shared_helper():
     import tempfile
-    from yt2tw.modules.base import bibkey_of
+    from ytdrill.modules.base import bibkey_of
     ctx = Context(url="u", workdir=Path(tempfile.mkdtemp()), config={})
     ctx.video_id = "abc123"
     assert bibkey_of(ctx) == "ytabc123"

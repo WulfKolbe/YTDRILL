@@ -1,5 +1,5 @@
 #!/bin/bash
-# Batch-run yt2tw over every .mkv in testdata/, one workdir per video.
+# Batch-run ytdrill over every .mkv in testdata/, one workdir per video.
 # Re-runnable: videos whose workdir already holds a tiddler are skipped.
 OUT="$HOME/Downloads/yt2tw-batch"
 mkdir -p "$OUT"
@@ -17,7 +17,7 @@ find testdata -name '*.mkv' -print0 | sort -z | while IFS= read -r -d '' f; do
   fi
   mkdir -p "$d"
   # </dev/null: children must never read the find-pipe feeding this loop
-  if timeout 3600 python3 -m yt2tw --slides --workdir "$d" "$f" \
+  if timeout 3600 python3 -m ytdrill --slides --workdir "$d" "$f" \
        > "$d/run.log" 2>&1 < /dev/null; then
     echo "OK   [$i/$total] $stem"
   else

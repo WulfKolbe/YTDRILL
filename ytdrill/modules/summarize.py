@@ -24,7 +24,7 @@ from pathlib import Path
 
 from .base import BaseModule, Context
 
-log = logging.getLogger("yt2tw")
+log = logging.getLogger("ytdrill")
 
 API_URL = "https://api.perplexity.ai/chat/completions"
 

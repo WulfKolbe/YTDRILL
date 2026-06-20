@@ -32,7 +32,7 @@ from pathlib import Path
 
 from .base import BaseModule, Context, bibkey_of
 
-log = logging.getLogger("yt2tw")
+log = logging.getLogger("ytdrill")
 
 _PTS = re.compile(r"pts_time:(\d+(?:\.\d+)?)")
 

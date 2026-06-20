@@ -1,4 +1,4 @@
-"""BaseModule / pipeline context for yt2tw.
+"""BaseModule / pipeline context for ytdrill.
 
 Mirrors the pdfdrill convention: additive modules, config.json-driven
 procOrder, shared mutable Context. Modules never modify each other's
@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-log = logging.getLogger("yt2tw")
+log = logging.getLogger("ytdrill")
 
 
 @dataclass
