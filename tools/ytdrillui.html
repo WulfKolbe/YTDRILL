@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ytdrill · run the pipeline</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#1d2021; --panel:#282828; --panel2:#32302f; --line:#3c3836;
+    --fg:#ebdbb2; --dim:#a89984; --faint:#928374;
+    --green:#b8bb26; --orange:#fe8019; --yellow:#fabd2f;
+    --blue:#83a598; --aqua:#8ec07c; --red:#fb4934;
+    --mono:"JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    --sans:system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; margin:0; }
+  body{
+    background:var(--bg); color:var(--fg); font-family:var(--sans);
+    display:grid; grid-template-rows:auto auto 1fr; height:100vh; overflow:hidden;
+  }
+  header{
+    display:flex; align-items:center; gap:14px; padding:10px 16px;
+    border-bottom:1px solid var(--line); background:var(--panel);
+  }
+  .brand{ font-family:var(--mono); font-weight:700; }
+  .brand .glyph{ color:var(--orange); }
+  .brand .sub{ color:var(--faint); font-weight:400; margin-left:8px; font-size:13px; }
+  .spacer{ flex:1; }
+  .chip{
+    font-family:var(--mono); font-size:12px; padding:4px 10px; border-radius:999px;
+    border:1px solid var(--line); color:var(--dim); display:inline-flex; align-items:center; gap:7px;
+  }
+  .dot{ width:8px; height:8px; border-radius:50%; background:var(--faint); }
+  .chip[data-state="ready"] .dot{ background:var(--green); box-shadow:0 0 8px var(--green); }
+  .chip[data-state="busy"]  .dot{ background:var(--yellow); animation:pulse 1s infinite; }
+  .chip[data-state="down"]  .dot{ background:var(--red); }
+  @keyframes pulse{ 50%{ opacity:.35; } }
+
+  .controls{
+    display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+    padding:12px 16px; border-bottom:1px solid var(--line); background:var(--panel2);
+  }
+  .controls input, .controls select{
+    font-family:var(--mono); font-size:13px; background:var(--bg); color:var(--fg);
+    border:1px solid var(--line); border-radius:7px; padding:9px 11px;
+  }
+  #url{ flex:1; min-width:260px; }
+  label.f{ font-family:var(--mono); font-size:12px; color:var(--faint); display:flex; gap:6px; align-items:center; }
+  #run{
+    font-family:var(--mono); font-size:13px; background:var(--green); color:#1d2021; border:0;
+    border-radius:7px; padding:9px 18px; font-weight:700; cursor:pointer;
+  }
+  #run:hover{ background:var(--yellow); }
+  #run:disabled{ background:var(--line); color:var(--faint); cursor:default; }
+
+  main{ display:grid; grid-template-columns:1fr 360px; min-height:0; }
+  @media (max-width:880px){ main{ grid-template-columns:1fr; } #rail{ display:none; } }
+  #log{
+    margin:0; padding:12px 16px; overflow:auto; min-height:0;
+    font-family:var(--mono); font-size:13px; line-height:1.5; white-space:pre-wrap;
+    background:var(--bg);
+  }
+  .l-info{ color:var(--fg); } .l-start{ color:var(--blue); }
+  .l-done{ color:var(--aqua); } .l-err{ color:var(--red); } .l-ok{ color:var(--green); }
+  .l-faint{ color:var(--faint); }
+
+  #rail{ border-left:1px solid var(--line); background:var(--panel); display:flex; flex-direction:column; min-height:0; }
+  .rail-head{ padding:12px 14px 8px; }
+  .rail-title{ font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:var(--faint); }
+  #facts{ padding:6px 14px; display:flex; flex-wrap:wrap; gap:6px; }
+  .fact{ font-family:var(--mono); font-size:11px; padding:2px 8px; border-radius:5px; background:#3c3836; color:var(--aqua); border:1px solid #504945; }
+  .rail-sub{ padding:10px 14px 6px; border-top:1px solid var(--line); }
+  #artifacts{ overflow:auto; padding:4px 10px 14px; }
+  .art{ display:flex; align-items:center; gap:8px; padding:7px 9px; margin:6px 2px; border:1px solid var(--line); border-radius:8px; background:var(--panel2); }
+  .art .ext{ font-family:var(--mono); font-size:10px; text-transform:uppercase; padding:2px 6px; border-radius:5px; background:#3c3836; color:var(--orange); border:1px solid #504945; }
+  .art .name{ flex:1; min-width:0; font-family:var(--mono); font-size:12px; color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .art a{ font-family:var(--mono); font-size:11px; color:var(--blue); text-decoration:none; padding:3px 8px; border:1px solid var(--line); border-radius:6px; }
+  .art a:hover{ border-color:var(--blue); }
+  .empty{ padding:20px 14px; color:var(--faint); font-size:13px; line-height:1.5; }
+</style>
+</head>
+<body>
+  <header>
+    <span class="brand"><span class="glyph">▚</span> ytdrill<span class="sub">run the pipeline</span></span>
+    <span class="spacer"></span>
+    <span class="chip" id="conn" data-state="down"><span class="dot"></span><span id="conn-label">offline</span></span>
+  </header>
+
+  <div class="controls">
+    <input id="url" spellcheck="false" placeholder="YouTube URL or local video path…" />
+    <label class="f">target
+      <select id="target"><option>connecting…</option></select>
+    </label>
+    <button id="run" disabled>Run</button>
+  </div>
+
+  <main>
+    <pre id="log"><span class="l-faint">  waiting for the server…</span></pre>
+    <aside id="rail">
+      <div class="rail-head"><div class="rail-title">Facts</div></div>
+      <div id="facts"><div class="empty" id="facts-empty">state-machine facts appear here as stages complete</div></div>
+      <div class="rail-sub"><div class="rail-title">Artifacts (PDFDRILL-compatible)</div></div>
+      <div id="artifacts"><div class="empty" id="art-empty"><code>&lt;bibkey&gt;.drill.json</code> + <code>.drill/</code> land here as links.</div></div>
+    </aside>
+  </main>
+
+  <section id="sumwrap" hidden style="border-top:1px solid #3c3836;padding:10px 14px 16px;max-height:46vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+      <strong style="color:#fabd2f">Summary — Markdown (references included)</strong>
+      <button id="copy-sum">Copy</button>
+      <a id="open-sum" target="_blank" rel="noopener" hidden>open .summary.md ↗</a>
+    </div>
+    <pre id="summary" style="white-space:pre-wrap;color:#ebdbb2;font:13px/1.55 ui-monospace,monospace;margin:0"></pre>
+  </section>
+
+<script>
+"use strict";
+const app = {
+  ws:null, busy:false, httpBase:location.origin,
+  el(id){ return document.getElementById(id); },
+
+  init(){
+    this.el("run").onclick = ()=> this.run();
+    this.el("url").addEventListener("keydown", e=>{ if(e.key==="Enter") this.run(); });
+    this.el("copy-sum").onclick = ()=>{
+      const t = this.el("summary").textContent;
+      navigator.clipboard.writeText(t).then(
+        ()=> this.el("copy-sum").textContent = "Copied ✓",
+        ()=> this.el("copy-sum").textContent = "copy failed");
+      setTimeout(()=> this.el("copy-sum").textContent = "Copy", 1500);
+    };
+    this.connect();
+  },
+
+  setConn(state, label){
+    const c = this.el("conn");
+    c.dataset.state = state;
+    this.el("conn-label").textContent = label || state;
+  },
+
+  log(text, cls="l-info"){
+    const span = document.createElement("span");
+    span.className = cls; span.textContent = text + "\n";
+    const pre = this.el("log");
+    if (pre.querySelector(".l-faint") && pre.children.length===1) pre.textContent="";
+    pre.appendChild(span); pre.scrollTop = pre.scrollHeight;
+  },
+
+  connect(){
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const url = `${proto}://${location.host}/ws`;
+    this.setConn("down","connecting…");
+    let ws; try{ ws = new WebSocket(url); }catch(e){ this.setConn("down","offline"); return; }
+    this.ws = ws;
+    ws.onopen = ()=> this.setConn("ready","ready");
+    ws.onclose = ()=>{ this.setConn("down","offline"); this.el("run").disabled = true; };
+    ws.onerror = ()=> this.setConn("down","error");
+    ws.onmessage = (ev)=>{ let m; try{ m=JSON.parse(ev.data); }catch(e){ return; } this.onMessage(m); };
+  },
+
+  onMessage(m){
+    switch(m.type){
+      case "hello":{
+        const sel = this.el("target"); sel.innerHTML = "";
+        for (const s of m.stages){ const o=document.createElement("option"); o.value=s; o.textContent=s; sel.appendChild(o); }
+        sel.value = m.stages[m.stages.length-1];
+        this.el("run").disabled = false;
+        this.log(`  ready · outdir ${m.outdir}`, "l-faint");
+        break;
+      }
+      case "started":
+        this.setConn("busy","running…"); this.busy=true; this.el("run").disabled=true;
+        this.resetRail();
+        this.log(`▶ ${m.url}  →  target: ${m.target}`, "l-start");
+        break;
+      case "stage":
+        if (m.phase==="start") this.log(`  ┄ ${m.node} …`, "l-faint");
+        else this.log(`  ✓ ${m.node}  (${Math.round(m.cost_ms)} ms)  ${m.detail||""}`, "l-done");
+        break;
+      case "done":
+        this.busy=false; this.setConn("ready","ready"); this.el("run").disabled=false;
+        this.log(`● done · ${m.bibkey} · ${m.facts.join(" → ")}`, "l-ok");
+        this.renderFacts(m.facts); this.renderArtifacts(m.artifacts);
+        this.renderSummary(m.summary, m.bibkey);
+        break;
+      case "error":
+        this.busy=false; this.setConn("ready","ready"); this.el("run").disabled=false;
+        this.log(`✗ ${m.message}`, "l-err");
+        break;
+    }
+  },
+
+  run(){
+    if (this.busy || !this.ws || this.ws.readyState!==1) return;
+    const url = this.el("url").value.trim();
+    if (!url){ this.log("  enter a URL first", "l-faint"); return; }
+    this.ws.send(JSON.stringify({ action:"run", url, target:this.el("target").value }));
+  },
+
+  resetRail(){
+    this.el("facts").innerHTML=""; this.el("artifacts").innerHTML="";
+    this.el("sumwrap").hidden = true; this.el("summary").textContent = "";
+  },
+  renderSummary(text, bibkey){
+    const wrap=this.el("sumwrap"), pre=this.el("summary"), open=this.el("open-sum");
+    if (text && text.trim()){
+      pre.textContent = text;
+      open.href = `${this.httpBase}/artifact?path=${encodeURIComponent(bibkey+".summary.md")}`;
+      open.hidden = false;
+      wrap.hidden = false;
+    } else {
+      pre.textContent = "(no summary — the run produced no transcript to summarise; "
+        + "pick a target that runs `summarize`, or the video had no captions)";
+      open.hidden = true;
+      wrap.hidden = false;
+    }
+  },
+  renderFacts(facts){
+    const wrap = this.el("facts"); wrap.innerHTML="";
+    for (const f of facts){ const s=document.createElement("span"); s.className="fact"; s.textContent=f; wrap.appendChild(s); }
+  },
+  renderArtifacts(arts){
+    const wrap = this.el("artifacts"); wrap.innerHTML="";
+    if (!arts || !arts.length){ wrap.innerHTML='<div class="empty">no artifacts</div>'; return; }
+    for (const a of arts){
+      const ext = (a.split(".").pop()||"").toLowerCase();
+      const row = document.createElement("div"); row.className="art";
+      row.innerHTML = `<span class="ext">${ext}</span><span class="name"></span><a target="_blank" rel="noopener">open ↗</a>`;
+      row.querySelector(".name").textContent = a;
+      row.querySelector(".name").title = a;
+      const link = row.querySelector("a");
+      link.href = `${this.httpBase}/artifact?path=${encodeURIComponent(a)}`;
+      wrap.appendChild(row);
+    }
+  },
+};
+window.addEventListener("DOMContentLoaded", ()=> app.init());
+</script>
+</body>
+</html>
