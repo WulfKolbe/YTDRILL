@@ -1,1 +1,2 @@
 yt-dlp>=2025.1.1
+aiohttp>=3.10        # tools/ytdrillui_server.py — the WebSocket pipeline runner

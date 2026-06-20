@@ -7,3 +7,5 @@ summary.md
 .env
 .env.*
 !.env.example
+ytdrill-out/
+resume.sh
