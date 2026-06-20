@@ -1,23 +1,27 @@
 """Lazy, layer-wise acquisition planner — the YTDRILL state machine.
 
-Mirrors PDFDRILL's fact-gated planner philosophy: escalate only as far as a
-goal needs, cheapest layer first, and NEVER run an expensive layer eagerly.
+Mirrors PDFDRILL's fact-gated philosophy: escalate only as far as the requested
+artifacts need, cheapest layer first, and NEVER run an expensive layer eagerly.
 
-    info  →  transcript (captions)  →  audio (iff no transcript)  →  video (last resort)
+    info  →  transcript (captions)  →  audio + ASR (iff no transcript)  →  video (slides only)
 
-  * `fetch_info`  — info block, size, description. Always, no download.
+  * `fetch_info`  — info block, size, description. Always; no download.
   * `transcript`  — original-language captions. Free; the normal content source.
-  * `audio`       — download the ORIGINAL audio stream ONLY, and only when the
-                    video has no usable caption track (it can then be
-                    transcribed). Never pulls the video stream.
-  * `video`       — the LAST RESORT: downloaded only for slide extraction.
+  * `audio` + `asr` — download the ORIGINAL audio stream ONLY and transcribe it
+                    with Whisper, and only when the video has no usable caption
+                    track. Never pulls the video stream.
+  * `video`       — the LAST RESORT: downloaded only when slides are requested.
+
+A local file takes the `local_source` path instead: the file already IS the
+video (metadata via ffprobe, transcript from a sidecar `.srt`), so nothing is
+ever downloaded.
 
 This replaces the old blind prefix runner (``stagerun.run_to``), which ran
-whatever stages were in ``procOrder`` — so a ``--slides`` order (or the
-sandbox's target) downloaded the video unconditionally. Here the video stream
-is reached only when the goal is ``slides``; a plain transcript/summary run can
-never download it. (Designed for sandbox/remote runs, not the local-only
-always-download assumption of the original ``yt2tw.sh``.)
+whatever stages sat in ``procOrder`` — so a ``--slides`` order downloaded the
+video unconditionally. Here the video stream is reached only when slides are
+requested; a plain transcript/summary run can never download it. (Designed for
+sandbox/remote runs, not the local-only always-download assumption of the
+original ``yt2tw.sh``.)
 
 Stdlib only; no network here, so the escalation logic is unit-testable.
 """
@@ -29,49 +33,26 @@ from typing import Callable
 from .modules.base import Context
 from .stagerun import _detail
 
-# goals that are only useful with a transcript (so an audio fallback makes sense)
-_NEEDS_TRANSCRIPT = {"transcript", "summary", "tiddler"}
 
-# base stages per goal; media-acquisition layers (audio/video) are inserted
-# LAZILY right after `transcript`, never listed here.
-GOAL_STAGES: dict[str, list[str]] = {
-    "info":       ["fetch_info"],
-    "transcript": ["fetch_info", "transcript", "emit_tiddler"],
-    "summary":    ["fetch_info", "transcript", "summarize",
-                   "extract_references", "emit_tiddler"],
-    "tiddler":    ["fetch_info", "transcript", "summarize",
-                   "extract_references", "emit_tiddler"],
-    "slides":     ["fetch_info", "transcript", "slides", "emit_tiddler"],
-}
-
-
-def media_layers(goal: str, *, has_transcript: bool) -> list[str]:
-    """The media-download layers to run AFTER ``fetch_info``+``transcript``,
-    given whether captions were obtained. A subset of ``["audio", "video"]``,
-    cheapest first, never escalating past what ``goal`` actually needs.
-
-    The hard guarantee: ``"video"`` is returned ONLY for ``goal == "slides"`` —
-    so a transcript/summary run can never download the video stream.
-    """
-    layers: list[str] = []
-    if goal in _NEEDS_TRANSCRIPT and not has_transcript:
-        layers.append("audio")        # fallback source for ASR — NOT the video
-    if goal == "slides":
-        layers.append("video")        # last resort: slide OCR needs the frames
-    return layers
-
-
-def run_goal(ctx: Context, registry: dict[str, type], *, goal: str,
+def run_plan(ctx: Context, registry: dict[str, type], *, is_local: bool,
+             want_summary: bool = True, want_slides: bool = False,
+             want_media: bool = False,
              on_event: Callable[[str, dict], None] | None = None) -> list[dict]:
-    """Run the lazy escalation for ``goal`` and return stage records
-    ``[{node, cost_ms, detail}]``. Always runs ``fetch_info`` (+ ``transcript``
-    when the goal needs it), then inserts the media layers chosen by
-    :func:`media_layers` from the RUNTIME transcript state, then the goal's
-    remaining stages. ``on_event(kind, payload)`` brackets each stage.
+    """Run the lazy escalation and return stage records ``[{node, cost_ms,
+    detail}]``. Composes the orthogonal options (summary × slides) and inserts
+    the audio+ASR fallback only when captions are missing.
+
+    Order:
+      source   — ``local_source`` for a file, else ``fetch_info`` + ``transcript``
+      fallback — ``audio`` then ``asr``, only for a URL whose transcript is empty
+      summary  — ``summarize`` + ``extract_references`` when ``want_summary``
+      video    — ``video`` download when slides/media are wanted (URL only;
+                 a local file is already the video)
+      slides   — ``slides`` when ``want_slides``
+      emit     — ``emit_tiddler`` always
+
+    ``on_event(kind, payload)`` brackets each stage with ``"start"``/``"done"``.
     """
-    if goal not in GOAL_STAGES:
-        raise ValueError(f"unknown goal {goal!r}; known: {', '.join(GOAL_STAGES)}")
-    base = GOAL_STAGES[goal]
     stages: list[dict] = []
 
     def run_one(node: str) -> None:
@@ -88,13 +69,26 @@ def run_goal(ctx: Context, registry: dict[str, type], *, goal: str,
         if on_event:
             on_event("done", rec)
 
-    run_one("fetch_info")                       # always: cheap metadata, no download
-    if "transcript" in base:
-        run_one("transcript")                   # free captions, the normal source
-    for node in media_layers(goal, has_transcript=bool(ctx.transcript)):
-        run_one(node)                           # lazy: audio iff no transcript / video iff slides
-    for node in base:                           # the rest of the goal's stages
-        if node in ("fetch_info", "transcript"):
-            continue
-        run_one(node)
+    # -- source layer --
+    if is_local:
+        run_one("local_source")          # metadata + sidecar-srt transcript + video_path
+    else:
+        run_one("fetch_info")            # cheap metadata, no download
+        run_one("transcript")            # free captions, the normal source
+        if not ctx.transcript:           # lazy fallback: download audio, then Whisper it
+            run_one("audio")
+            run_one("asr")
+
+    # -- summary layer --
+    if want_summary:
+        run_one("summarize")
+        run_one("extract_references")
+
+    # -- video / slides layer (last resort; a local file is already the video) --
+    if (want_slides or want_media) and not is_local:
+        run_one("video")
+    if want_slides:
+        run_one("slides")
+
+    run_one("emit_tiddler")
     return stages

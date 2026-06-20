@@ -344,34 +344,15 @@ def test_emit_bibkey_override():
     assert t["bibkey"] == "locAbCdEf12345"
 
 
-def test_media_layers_lazy_escalation():
-    from ytdrill.planner import media_layers
-    # captions present → never download anything
-    assert media_layers("summary", has_transcript=True) == []
-    assert media_layers("tiddler", has_transcript=True) == []
-    assert media_layers("transcript", has_transcript=True) == []
-    # no captions → fall back to AUDIO only (for later ASR), never video
-    assert media_layers("summary", has_transcript=False) == ["audio"]
-    assert media_layers("transcript", has_transcript=False) == ["audio"]
-    # slides is the ONLY goal that pulls the video stream (last resort)
-    assert media_layers("slides", has_transcript=True) == ["video"]
-    # the bug guard: a non-slides goal must NEVER fetch the video stream
-    for g in ("info", "transcript", "summary", "tiddler"):
-        assert "video" not in media_layers(g, has_transcript=False)
-    assert media_layers("info", has_transcript=False) == []
-
-
 def test_audio_layer_format_excludes_video():
     from ytdrill.modules.yt import AudioDownload
     fmt = AudioDownload.format_for({}, {})
     assert "bestaudio" in fmt and "bestvideo" not in fmt
 
 
-def test_run_goal_is_lazy_about_media():
-    from ytdrill.planner import run_goal
-    import tempfile
-    ran: list[str] = []
-
+def _plan_reg(ran, *, captions):
+    """Fake registry whose modules append their name to `ran`. transcript /
+    local_source / asr set a transcript via the `captions` toggle."""
     def mk(name, effect=None):
         class M:
             def __init__(self, cfg): self.cfg = cfg
@@ -380,36 +361,79 @@ def test_run_goal_is_lazy_about_media():
                 if effect:
                     effect(ctx)
         return M
-
-    def gives_captions(ctx): ctx.transcript = "words"
-    base = {
+    fill = lambda ctx: setattr(ctx, "transcript", "words")
+    return {
         "fetch_info": mk("fetch_info"),
+        "transcript": mk("transcript", fill if captions else None),
+        "local_source": mk("local_source", fill),
+        "audio": mk("audio"),
+        "asr": mk("asr", fill),               # ASR fills the transcript
         "summarize": mk("summarize"),
         "extract_references": mk("extract_references"),
+        "video": mk("video"), "slides": mk("slides"),
         "emit_tiddler": mk("emit_tiddler"),
-        "audio": mk("audio"), "video": mk("video"), "slides": mk("slides"),
     }
-    # captions found → no media of any kind
-    ran.clear()
-    reg = {**base, "transcript": mk("transcript", gives_captions)}
-    run_goal(Context(url="u", workdir=Path(tempfile.mkdtemp()), config={}),
-             reg, goal="summary")
-    assert "audio" not in ran and "video" not in ran
 
-    # no captions → audio fallback only, never video
-    ran.clear()
-    reg = {**base, "transcript": mk("transcript")}      # leaves ctx.transcript empty
-    run_goal(Context(url="u", workdir=Path(tempfile.mkdtemp()), config={}),
-             reg, goal="summary")
-    assert "audio" in ran and "video" not in ran
 
-    # slides → video (last resort), fetched BEFORE the OCR stage
+def test_run_plan_lazy_and_composable():
+    from ytdrill.planner import run_plan
+    import tempfile
+    ran: list[str] = []
+    fresh = lambda: Context(url="u", workdir=Path(tempfile.mkdtemp()), config={})
+
+    # URL + captions + summary → no media of any kind
     ran.clear()
-    reg = {**base, "transcript": mk("transcript", gives_captions)}
-    run_goal(Context(url="u", workdir=Path(tempfile.mkdtemp()), config={}),
-             reg, goal="slides")
-    assert "video" in ran and "audio" not in ran
-    assert ran.index("video") < ran.index("slides")
+    run_plan(fresh(), _plan_reg(ran, captions=True),
+             is_local=False, want_summary=True, want_slides=False)
+    assert ran == ["fetch_info", "transcript", "summarize",
+                   "extract_references", "emit_tiddler"]
+
+    # URL + NO captions → audio THEN asr (never video)
+    ran.clear()
+    run_plan(fresh(), _plan_reg(ran, captions=False),
+             is_local=False, want_summary=True, want_slides=False)
+    assert ran[:4] == ["fetch_info", "transcript", "audio", "asr"]
+    assert "video" not in ran
+
+    # URL --slides keeps the summary AND fetches video before the OCR stage
+    ran.clear()
+    run_plan(fresh(), _plan_reg(ran, captions=True),
+             is_local=False, want_summary=True, want_slides=True)
+    assert "summarize" in ran and ran.index("video") < ran.index("slides")
+
+    # URL --slides --no-summary → no summary; video still precedes slides
+    ran.clear()
+    run_plan(fresh(), _plan_reg(ran, captions=True),
+             is_local=False, want_summary=False, want_slides=True)
+    assert "summarize" not in ran and ran.index("video") < ran.index("slides")
+
+    # LOCAL file: local_source is the source; NEVER fetch_info/transcript/audio/video
+    ran.clear()
+    run_plan(fresh(), _plan_reg(ran, captions=True),
+             is_local=True, want_summary=True, want_slides=True)
+    assert ran[0] == "local_source"
+    assert not ({"fetch_info", "transcript", "audio", "video"} & set(ran))
+    assert "slides" in ran and ran[-1] == "emit_tiddler"
+
+
+def test_asr_segments_from_whisper():
+    from ytdrill.modules.asr import segments_from_whisper
+    segs = segments_from_whisper([
+        {"start": 0.0, "end": 2.5, "text": " hello"},
+        {"start": 2.5, "end": 4.0, "text": "world "},
+    ])
+    assert segs == [
+        {"t0": 0, "t1": 2500, "text": "hello"},
+        {"t0": 2500, "t1": 4000, "text": "world"},
+    ]
+
+
+def test_asr_skips_without_audio():
+    import tempfile
+    from ytdrill.modules.asr import WhisperASR
+    ctx = Context(url="u", workdir=Path(tempfile.mkdtemp()), config={})
+    WhisperASR({}).run(ctx)               # no audio_path → graceful no-op
+    assert ctx.transcript == "" and ctx.segments == []
 
 
 if __name__ == "__main__":
@@ -424,9 +448,9 @@ if __name__ == "__main__":
                test_subprocesses_do_not_eat_stdin,
                test_local_sidecar_discovery, test_local_id_deterministic,
                test_bibkey_of_shared_helper, test_emit_bibkey_override,
-               test_media_layers_lazy_escalation,
                test_audio_layer_format_excludes_video,
-               test_run_goal_is_lazy_about_media):
+               test_run_plan_lazy_and_composable,
+               test_asr_segments_from_whisper, test_asr_skips_without_audio):
         fn()
         print(f"ok  {fn.__name__}")
     print("all tests passed")

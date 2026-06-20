@@ -65,14 +65,23 @@ compromised and rotated before this repo goes public.
 
 ## Pipeline architecture
 
-`config.json` drives a `procOrder` of additive modules (`BaseModule`
-pattern); modules communicate only through the shared `Context`:
+`ytdrill/planner.py` (`run_plan`) drives a **lazy, layer-wise** state machine
+over additive modules (`BaseModule` pattern) that communicate only through the
+shared `Context`. It escalates only as far as the requested artifacts need:
+
+    info → transcript (captions) → audio + ASR (iff no captions) → video (slides only)
+
+So a transcript/summary run **never downloads the video**; the video stream is
+fetched only for `--slides`, and the audio stream only when a video has no
+caption track. The modules:
 
 | module        | does                                                            |
 |---------------|-----------------------------------------------------------------|
 | `fetch_info`  | single `yt_dlp.extract_info(download=False)`; caches info dict   |
 | `local_source`| *(local files)* replaces fetch_info+transcript+media: metadata via ffprobe, transcript from sidecar `<stem>.<lang>.srt` (`lang_priority` config), bibkey `loc<blake2b(stem)[:11]>`, video ready for `slides` |
 | `transcript`  | picks original-language track (manual > `*-orig` auto > auto), json3 > srt/vtt; emits plain text **and** timed segments |
+| `audio`       | *(lazy fallback)* downloads the **original audio stream only** (never the video) — runs only when `transcript` found no captions |
+| `asr`         | *(lazy fallback)* Whisper (`faster-whisper`, CPU `int8`) over the downloaded audio → fills the same `transcript`/`segments` as the caption path; `modules.asr.model` (default `base`) |
 | `summarize`   | Perplexity Sonar, triple no-search guard, transcript-first prompt, `prompts/howto.md` template (the original tested `howto.txt`, with the unfilled *Inputs Provided* block removed at the template level instead of via `sed`); optional `## COMMENTS` section when `modules.fetch_info.max_comments > 0` |
 | `extract_references` | parses the `@type{key,...}` BibTeX entries the howto forces into the summary (brace-counting, nested braces safe) and attaches `bibtex` + `cite-keys` tiddler fields via the additive `ctx.extra_fields` contract — the direct pdfdrill handoff |
 | `media`       | *(optional, `--media`)* video + **original** audio stream (`language_preference`/`format_note=original` pinning) — prep for slide isolation |
