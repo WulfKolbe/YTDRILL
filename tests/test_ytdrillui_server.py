@@ -137,6 +137,22 @@ def test_ws_run_surfaces_markdown_summary(tmp_path, monkeypatch):
     assert (tmp_path / "yttestid12345.summary.md").read_text().startswith("# Title")
 
 
+def test_artifact_serves_markdown_with_charset(tmp_path):
+    # a MIME carrying '; charset=utf-8' (md/html/json/txt) must not crash the
+    # /artifact handler — aiohttp rejects charset in the content_type argument.
+    (tmp_path / "x.summary.md").write_text("# hi", encoding="utf-8")
+
+    async def body():
+        app = SRV.make_app(tmp_path)
+        async with TestClient(TestServer(app)) as client:
+            r = await client.get("/artifact", params={"path": "x.summary.md"})
+            assert r.status == 200, await r.text()
+            assert "# hi" in await r.text()
+            assert r.headers["Content-Type"].startswith("text/markdown")
+
+    asyncio.run(body())
+
+
 def test_ws_unknown_target_reports_error(tmp_path, monkeypatch):
     monkeypatch.setattr(SRV, "REGISTRY", {"fetch_info": _FakeFetch})
     monkeypatch.setattr(SRV, "_config",

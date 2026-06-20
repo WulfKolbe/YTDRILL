@@ -144,9 +144,10 @@ async def artifact(request: web.Request) -> web.Response:
         return web.Response(status=403, text="forbidden path")
     if not target.is_file():
         return web.Response(status=404, text="not found")
-    return web.Response(body=target.read_bytes(),
-                        content_type=MIME.get(target.suffix.lower(),
-                                              "application/octet-stream"))
+    # set the full type (incl. charset) via the header — aiohttp's
+    # content_type= argument rejects a charset, which 500'd .md/.html/.json
+    ct = MIME.get(target.suffix.lower(), "application/octet-stream")
+    return web.Response(body=target.read_bytes(), headers={"Content-Type": ct})
 
 
 def make_app(outdir: Path) -> web.Application:
