@@ -222,12 +222,48 @@ class MediaDownload(BaseModule):
 
     @staticmethod
     def _original_audio_selector(info: dict) -> str:
-        for f in info.get("formats", []):
-            note = (f.get("format_note") or "").lower()
-            if f.get("acodec") not in (None, "none") and (
-                "original" in note or f.get("language_preference", -1) > 0
-            ):
-                lang = f.get("language")
-                if lang:
-                    return f"bestaudio[language^={lang.split('-')[0]}]"
-        return "bestaudio"
+        return _original_audio_selector(info)
+
+
+# module-level so AudioDownload can share it without a MediaDownload instance
+def _original_audio_selector(info: dict) -> str:
+    """A yt-dlp format selector pinning the ORIGINAL audio track. When a video
+    carries multiple audio streams (dubs), yt-dlp gives the original a higher
+    language_preference (>0) and marks it 'original'; we pin it explicitly so a
+    future yt-dlp default change can't silently pick a dub."""
+    for f in info.get("formats", []):
+        note = (f.get("format_note") or "").lower()
+        if f.get("acodec") not in (None, "none") and (
+            "original" in note or f.get("language_preference", -1) > 0
+        ):
+            lang = f.get("language")
+            if lang:
+                return f"bestaudio[language^={lang.split('-')[0]}]"
+    return "bestaudio"
+
+
+# --------------------------------------------------------------------------
+class AudioDownload(BaseModule):
+    """The lazy AUDIO-ONLY fallback: download the original audio stream when a
+    video has no usable caption track, so it can later be transcribed (ASR).
+    Never fetches the video stream — that is the slides-only last resort.
+    """
+    name = "audio"
+
+    @staticmethod
+    def format_for(info: dict, cfg: dict) -> str:
+        """An audio-only yt-dlp selector (no video stream)."""
+        return cfg.get("format") or _original_audio_selector(info)
+
+    def run(self, ctx: Context) -> None:
+        info = ctx.info or {}
+        fmt = self.format_for(info, self.cfg)
+        outtmpl = self.cfg.get("outtmpl", "%(id)s.%(ext)s")
+        with _ydl(ctx.workdir, format=fmt,
+                  outtmpl={"default": outtmpl}) as ydl:
+            res = ydl.process_ie_result(dict(info), download=True)
+        path = res.get("requested_downloads", [{}])[0].get("filepath") \
+            or res.get("filepath")
+        if path:
+            ctx.audio_path = Path(path)
+            log.info("    audio -> %s", path)

@@ -344,6 +344,74 @@ def test_emit_bibkey_override():
     assert t["bibkey"] == "locAbCdEf12345"
 
 
+def test_media_layers_lazy_escalation():
+    from ytdrill.planner import media_layers
+    # captions present → never download anything
+    assert media_layers("summary", has_transcript=True) == []
+    assert media_layers("tiddler", has_transcript=True) == []
+    assert media_layers("transcript", has_transcript=True) == []
+    # no captions → fall back to AUDIO only (for later ASR), never video
+    assert media_layers("summary", has_transcript=False) == ["audio"]
+    assert media_layers("transcript", has_transcript=False) == ["audio"]
+    # slides is the ONLY goal that pulls the video stream (last resort)
+    assert media_layers("slides", has_transcript=True) == ["video"]
+    # the bug guard: a non-slides goal must NEVER fetch the video stream
+    for g in ("info", "transcript", "summary", "tiddler"):
+        assert "video" not in media_layers(g, has_transcript=False)
+    assert media_layers("info", has_transcript=False) == []
+
+
+def test_audio_layer_format_excludes_video():
+    from ytdrill.modules.yt import AudioDownload
+    fmt = AudioDownload.format_for({}, {})
+    assert "bestaudio" in fmt and "bestvideo" not in fmt
+
+
+def test_run_goal_is_lazy_about_media():
+    from ytdrill.planner import run_goal
+    import tempfile
+    ran: list[str] = []
+
+    def mk(name, effect=None):
+        class M:
+            def __init__(self, cfg): self.cfg = cfg
+            def run(self, ctx):
+                ran.append(name)
+                if effect:
+                    effect(ctx)
+        return M
+
+    def gives_captions(ctx): ctx.transcript = "words"
+    base = {
+        "fetch_info": mk("fetch_info"),
+        "summarize": mk("summarize"),
+        "extract_references": mk("extract_references"),
+        "emit_tiddler": mk("emit_tiddler"),
+        "audio": mk("audio"), "video": mk("video"), "slides": mk("slides"),
+    }
+    # captions found → no media of any kind
+    ran.clear()
+    reg = {**base, "transcript": mk("transcript", gives_captions)}
+    run_goal(Context(url="u", workdir=Path(tempfile.mkdtemp()), config={}),
+             reg, goal="summary")
+    assert "audio" not in ran and "video" not in ran
+
+    # no captions → audio fallback only, never video
+    ran.clear()
+    reg = {**base, "transcript": mk("transcript")}      # leaves ctx.transcript empty
+    run_goal(Context(url="u", workdir=Path(tempfile.mkdtemp()), config={}),
+             reg, goal="summary")
+    assert "audio" in ran and "video" not in ran
+
+    # slides → video (last resort), fetched BEFORE the OCR stage
+    ran.clear()
+    reg = {**base, "transcript": mk("transcript", gives_captions)}
+    run_goal(Context(url="u", workdir=Path(tempfile.mkdtemp()), config={}),
+             reg, goal="slides")
+    assert "video" in ran and "audio" not in ran
+    assert ran.index("video") < ran.index("slides")
+
+
 if __name__ == "__main__":
     for fn in (test_srt_clean, test_srt_matches_awk,
                test_json3_clean, test_emit_tiddler,
@@ -355,7 +423,10 @@ if __name__ == "__main__":
                test_clean_frame_dir_removes_stale_files,
                test_subprocesses_do_not_eat_stdin,
                test_local_sidecar_discovery, test_local_id_deterministic,
-               test_bibkey_of_shared_helper, test_emit_bibkey_override):
+               test_bibkey_of_shared_helper, test_emit_bibkey_override,
+               test_media_layers_lazy_escalation,
+               test_audio_layer_format_excludes_video,
+               test_run_goal_is_lazy_about_media):
         fn()
         print(f"ok  {fn.__name__}")
     print("all tests passed")

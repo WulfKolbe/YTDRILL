@@ -16,7 +16,7 @@ from pathlib import Path
 
 from .env import load_env
 from .modules.base import Context, load_config, run_pipeline
-from .modules.yt import FetchInfo, Transcript, MediaDownload
+from .modules.yt import FetchInfo, Transcript, MediaDownload, AudioDownload
 from .modules.local import LocalSource
 from .modules.references import ExtractReferences
 from .modules.slides import SlideExtract
@@ -27,7 +27,9 @@ REGISTRY = {
     "fetch_info": FetchInfo,
     "transcript": Transcript,
     "local_source": LocalSource,
-    "media": MediaDownload,
+    "media": MediaDownload,      # video+audio (explicit --media)
+    "audio": AudioDownload,      # lazy audio-only fallback (no transcript)
+    "video": MediaDownload,      # last resort, for slide extraction
     "slides": SlideExtract,
     "summarize": Summarize,
     "extract_references": ExtractReferences,
