@@ -91,7 +91,8 @@ class Transcript(BaseModule):
 
     Preference order for the caption track:
       1. manual subtitles in the original language
-      2. automatic_captions '<lang>-orig' (YouTube's untranslated ASR track)
+      2. automatic_captions '<lang>-orig' / '<base>-orig' (YouTube's
+         untranslated ASR track; e.g. lang 'en-US' -> 'en-orig')
       3. automatic_captions '<lang>'
       4. first available manual track, then first auto track
 
@@ -133,10 +134,15 @@ class Transcript(BaseModule):
     @staticmethod
     def _pick_track(subs: dict, autos: dict, lang: str):
         if lang:
-            for key in (lang, lang.split("-")[0]):
+            base = lang.split("-")[0]
+            for key in (lang, base):
                 if key in subs:
                     return subs[key], f"sub:{key}"
-            for key in (f"{lang}-orig", lang, lang.split("-")[0]):
+            # info.language may be regional ("en-US") while the original
+            # ASR track is keyed by the base code ("en-orig"); the bare
+            # "en" auto track is then a machine translation (tlang=en)
+            # that YouTube 429s — so every -orig candidate goes first.
+            for key in (f"{lang}-orig", f"{base}-orig", lang, base):
                 if key in autos:
                     return autos[key], f"auto:{key}"
         # original ASR track is suffixed -orig even when info.language is empty

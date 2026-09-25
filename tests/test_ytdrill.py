@@ -84,6 +84,18 @@ def test_json3_clean():
     ]
 
 
+def test_pick_track_prefers_base_orig_over_translation():
+    # 2026-09: YouTube reports language "en-US" while the original ASR
+    # track is keyed "en-orig"; plain "en" is a machine translation
+    # (tlang=en) that 429s. The -orig track must win.
+    from ytdrill.modules.yt import Transcript
+    autos = {"en": [{"ext": "json3", "url": "tlang"}],
+             "en-orig": [{"ext": "json3", "url": "orig"}]}
+    track, name = Transcript._pick_track({}, autos, "en-US")
+    assert name == "auto:en-orig"
+    assert track[0]["url"] == "orig"
+
+
 def test_emit_tiddler(tmp_path=None):
     import tempfile
     tmp = Path(tmp_path or tempfile.mkdtemp())
@@ -555,7 +567,8 @@ def test_article_parses_through_textscan():
 
 
 if __name__ == "__main__":
-    for fn in (test_srt_clean, test_srt_matches_awk,
+    for fn in (test_pick_track_prefers_base_orig_over_translation,
+               test_srt_clean, test_srt_matches_awk,
                test_json3_clean, test_emit_tiddler,
                test_build_video_html, test_emit_two_tiddlers_local,
                test_env_loader, test_extract_references,
