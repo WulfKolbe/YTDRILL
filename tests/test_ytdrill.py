@@ -96,6 +96,170 @@ def test_pick_track_prefers_base_orig_over_translation():
     assert track[0]["url"] == "orig"
 
 
+def test_perplexity_chat_uses_responses_api(monkeypatch=None):
+    # 2026-10: Sonar moved to the Agent API — /chat/completions answers
+    # 403 agent_api_migration_required. Request shape: instructions+input
+    # on /v1/responses, model "perplexity/sonar", no preset (= no search).
+    import io
+    import urllib.request
+    from ytdrill import perplexity
+    seen = {}
+    body = {"output": [{"type": "message", "role": "assistant", "content": [
+        {"type": "output_text", "text": "Hello "},
+        {"type": "output_text", "text": "world"}]}]}
+
+    def fake_urlopen(req, timeout=None):
+        seen["url"] = req.full_url
+        seen["payload"] = json.loads(req.data)
+        return io.BytesIO(json.dumps(body).encode())
+
+    orig = urllib.request.urlopen
+    urllib.request.urlopen = fake_urlopen
+    try:
+        out = perplexity.chat("k", "sonar", "SYS", "USER",
+                              max_tokens=100, temperature=0.3)
+    finally:
+        urllib.request.urlopen = orig
+    assert out == "Hello world"
+    assert seen["url"] == "https://api.perplexity.ai/v1/responses"
+    pl = seen["payload"]
+    assert pl["model"] == "perplexity/sonar"     # legacy name mapped
+    assert pl["instructions"] == "SYS" and pl["input"] == "USER"
+    assert pl["max_output_tokens"] == 100 and pl["temperature"] == 0.3
+    assert "preset" not in pl and "tools" not in pl
+
+
+def test_audio_download_extracts_in_its_own_session(tmp_path=None):
+    # 2026-10: YouTube binds stream URLs to the session that extracted
+    # them; replaying the cached info dict in a new YoutubeDL session
+    # (process_ie_result) 403s. Downloads must re-extract in-session.
+    import tempfile
+    from ytdrill.modules import yt
+    calls = []
+
+    class FakeYDL:
+        def __init__(self, opts): self.opts = opts
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def extract_info(self, url, download=False):
+            calls.append(("extract_info", url, download, self.opts["format"]))
+            return {"requested_downloads": [{"filepath": "/x/a.webm"}]}
+        def process_ie_result(self, *a, **k):
+            calls.append(("process_ie_result",))
+            return {}
+
+    orig = yt._ydl
+    yt._ydl = lambda workdir, **extra: FakeYDL(extra)
+    try:
+        ctx = Context(url="https://youtu.be/x",
+                      workdir=Path(tmp_path or tempfile.mkdtemp()),
+                      config={})
+        ctx.info = {"formats": []}
+        yt.AudioDownload({}).run(ctx)
+    finally:
+        yt._ydl = orig
+    assert calls == [("extract_info", "https://youtu.be/x", True, "bestaudio")]
+    assert str(ctx.audio_path) == "/x/a.webm"
+
+
+def _fake_ydl_factory(results_by_client, calls):
+    """_ydl stand-in: extract_info returns results_by_client[player_client]."""
+    class FakeYDL:
+        def __init__(self, opts): self.opts = opts
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def extract_info(self, url, download=False):
+            client = (self.opts.get("extractor_args", {})
+                      .get("youtube", {}).get("player_client", ["default"])[0])
+            calls.append(client)
+            return results_by_client.get(client, {})
+    return lambda workdir, **extra: FakeYDL(extra)
+
+
+def test_caption_candidates_cover_every_language():
+    # Any language will do (Perplexity reads them all); original ASR
+    # first, translations (plain auto keys beside an -orig) last.
+    from ytdrill.modules.yt import Transcript
+    subs = {"de": [{"ext": "json3", "url": "de"}]}
+    autos = {"fr-orig": [{"ext": "json3", "url": "fr-orig"}],
+             "fr": [{"ext": "json3", "url": "fr"}],
+             "en": [{"ext": "json3", "url": "en-tl"}]}
+    names = [n for _, n in Transcript._caption_candidates(subs, autos, "")]
+    assert names == ["auto:fr-orig", "sub:de", "auto:fr", "auto:en"]
+    names = [n for _, n in Transcript._caption_candidates(subs, autos, "de-DE")]
+    assert names[0] == "sub:de"
+
+
+def test_transcript_falls_through_failed_tracks(tmp_path=None):
+    import tempfile
+    import urllib.error
+    from ytdrill.modules import yt
+    tried = []
+
+    def fake_download(url, retries=5):
+        tried.append(url)
+        if url == "bad":
+            raise urllib.error.HTTPError(url, 429, "Too Many", {}, None)
+        return SAMPLE_JSON3
+
+    ctx = Context(url="u", workdir=Path(tmp_path or tempfile.mkdtemp()),
+                  config={})
+    ctx.info = {"automatic_captions": {
+        "en-orig": [{"ext": "json3", "url": "bad"}],
+        "de-orig": [{"ext": "json3", "url": "good"}]}}
+    orig = yt.Transcript._download
+    yt.Transcript._download = staticmethod(fake_download)
+    try:
+        yt.Transcript({}).run(ctx)
+    finally:
+        yt.Transcript._download = orig
+    assert tried == ["bad", "good"]
+    assert ctx.transcript == "hello world second event"
+
+
+def test_transcript_probes_other_clients_before_giving_up(tmp_path=None):
+    import tempfile
+    from ytdrill.modules import yt
+    calls = []
+    found = {"automatic_captions": {"ja-orig": [{"ext": "json3", "url": "ja"}]}}
+    ctx = Context(url="u", workdir=Path(tmp_path or tempfile.mkdtemp()),
+                  config={})
+    ctx.info = {}                                  # default client: nothing
+    orig_ydl, orig_dl = yt._ydl, yt.Transcript._download
+    yt._ydl = _fake_ydl_factory({"mweb": found}, calls)
+    yt.Transcript._download = staticmethod(lambda url, retries=5: SAMPLE_JSON3)
+    try:
+        yt.Transcript({"fallback_clients": ["web_safari", "mweb", "ios"]}).run(ctx)
+    finally:
+        yt._ydl, yt.Transcript._download = orig_ydl, orig_dl
+    assert calls == ["web_safari", "mweb"]          # stops at the first hit
+    assert ctx.transcript == "hello world second event"
+
+
+def test_list_subs_reports_every_client_and_language():
+    from ytdrill.modules import yt
+    calls = []
+    results = {
+        "default": {"subtitles": {"de": [{"ext": "vtt"}, {"ext": "json3"}]},
+                    "automatic_captions": {"en-orig": [{"ext": "json3"}],
+                                           "en": [{"ext": "json3"}],
+                                           "fr": [{"ext": "json3"}]}},
+        "ios": {},
+    }
+    orig = yt._ydl
+    yt._ydl = _fake_ydl_factory(results, calls)
+    try:
+        text = yt.list_subs("u", Path("."), clients=["default", "ios"])
+    finally:
+        yt._ydl = orig
+    assert calls == ["default", "ios"]
+    assert "default" in text and "ios" in text
+    assert "sub   de" in text and "vtt, json3" in text
+    assert "auto  en-orig" in text
+    assert "translated: en, fr" in text
+    assert "(none)" in text                          # ios has nothing
+
+
 def test_emit_tiddler(tmp_path=None):
     import tempfile
     tmp = Path(tmp_path or tempfile.mkdtemp())
@@ -568,6 +732,12 @@ def test_article_parses_through_textscan():
 
 if __name__ == "__main__":
     for fn in (test_pick_track_prefers_base_orig_over_translation,
+               test_perplexity_chat_uses_responses_api,
+               test_audio_download_extracts_in_its_own_session,
+               test_caption_candidates_cover_every_language,
+               test_transcript_falls_through_failed_tracks,
+               test_transcript_probes_other_clients_before_giving_up,
+               test_list_subs_reports_every_client_and_language,
                test_srt_clean, test_srt_matches_awk,
                test_json3_clean, test_emit_tiddler,
                test_build_video_html, test_emit_two_tiddlers_local,

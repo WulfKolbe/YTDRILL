@@ -3,6 +3,7 @@
 Usage:
     python -m ytdrill <youtube-url> [--workdir DIR] [--config config.json]
                     [--no-summary] [--media]
+    python -m ytdrill --list-subs <youtube-url>
 
 Exit codes: 0 ok, 1 runtime failure, 2 config error.
 """
@@ -19,7 +20,7 @@ from .modules.base import Context, load_config
 from .planner import run_plan
 
 log = logging.getLogger("ytdrill")
-from .modules.yt import FetchInfo, Transcript, MediaDownload, AudioDownload
+from .modules.yt import FetchInfo, Transcript, MediaDownload, AudioDownload, list_subs
 from .modules.local import LocalSource
 from .modules.references import ExtractReferences
 from .modules.slides import SlideExtract
@@ -85,6 +86,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--slides", action="store_true",
                     help="extract slide frames to a searchable OCR'd PDF "
                          "for pdfdrill (implies --media)")
+    ap.add_argument("--list-subs", action="store_true",
+                    help="list every subtitle / auto-caption language each "
+                         "YouTube client offers, then exit (no download, "
+                         "no Perplexity)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
 
@@ -124,6 +129,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     is_local = Path(args.url).expanduser().is_file()
+    if args.list_subs:
+        if is_local:
+            ap.error("--list-subs needs a YouTube URL, not a local file")
+        print(list_subs(args.url, workdir))
+        return 0
     ctx = Context(url=args.url, workdir=workdir, config=config)
     # Lazy escalation (planner.run_plan): captions first; download audio+ASR
     # only when there are no captions; download the video ONLY for slides.

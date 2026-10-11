@@ -35,6 +35,16 @@ def _ydl(workdir: Path, **extra):
     return yt_dlp.YoutubeDL(opts)
 
 
+def _download_in_session(ctx: Context, **opts) -> dict:
+    """Re-extract and download in ONE YoutubeDL session. YouTube binds the
+    stream URLs to the session that extracted them, so replaying the cached
+    ctx.info in a fresh session (process_ie_result) now 403s. Only the
+    download fallbacks (audio for ASR, video for slides) pay this second
+    extraction; the caption path still uses the single cached call."""
+    with _ydl(ctx.workdir, **opts) as ydl:
+        return ydl.extract_info(ctx.url, download=True)
+
+
 # --------------------------------------------------------------------------
 class FetchInfo(BaseModule):
     """Single extract_info() call; populates all metadata on the Context."""
@@ -85,16 +95,69 @@ class FetchInfo(BaseModule):
                  ctx.video_id, ctx.title, ctx.duration, ctx.language or "?")
 
 
+# YouTube clients asked for captions when the default extraction has none:
+# each client sees a different player response, and caption tracks can be
+# missing from one but present in another.
+FALLBACK_CLIENTS = ["web_safari", "mweb", "android_vr", "ios", "tv"]
+
+
+def _captions_via_client(url: str, workdir: Path, client: str) -> dict:
+    """Metadata from one player client ("default" = yt-dlp's own choice)."""
+    # captions only: a client without playable formats still lists them
+    opts = {"ignore_no_formats_error": True}
+    if client != "default":
+        opts["extractor_args"] = {"youtube": {"player_client": [client]}}
+    with _ydl(workdir, **opts) as ydl:
+        return ydl.extract_info(url, download=False) or {}
+
+
+def list_subs(url: str, workdir: Path, clients: list[str] | None = None) -> str:
+    """Complete caption inventory per client: manual subtitles, original
+    auto captions (with formats) and the machine-translation targets."""
+    lines = []
+    for client in clients or ["default", *FALLBACK_CLIENTS]:
+        lines.append(f"== {client}")
+        try:
+            info = _captions_via_client(url, workdir, client)
+        except Exception as e:                    # noqa: BLE001 — report, go on
+            lines.append(f"error: {str(e).strip()[:200]}")
+            continue
+        subs = info.get("subtitles") or {}
+        autos = info.get("automatic_captions") or {}
+        if not subs and not autos:
+            lines.append("(none)")
+            continue
+        fmts = lambda track: ", ".join(f.get("ext", "?") for f in track)
+        for key, track in subs.items():
+            lines.append(f"sub   {key:<10} {fmts(track)}")
+        has_orig = any(k.endswith("-orig") for k in autos)
+        translated = []
+        for key, track in autos.items():
+            if has_orig and not key.endswith("-orig"):
+                translated.append(key)
+            else:
+                lines.append(f"auto  {key:<10} {fmts(track)}")
+        if translated:
+            lines.append(f"      translated: {', '.join(translated)}")
+    return "\n".join(lines)
+
+
 # --------------------------------------------------------------------------
 class Transcript(BaseModule):
-    """Fetch the original-language auto captions from the cached info dict.
+    """Fetch a caption track — in ANY language (Perplexity reads them all).
 
-    Preference order for the caption track:
-      1. manual subtitles in the original language
+    Candidate order (``_caption_candidates``):
+      1. manual subtitles in the video language
       2. automatic_captions '<lang>-orig' / '<base>-orig' (YouTube's
          untranslated ASR track; e.g. lang 'en-US' -> 'en-orig')
-      3. automatic_captions '<lang>'
-      4. first available manual track, then first auto track
+      3. every other '-orig' auto track, then every manual track
+      4. the remaining auto tracks — machine translations (tlang=…), which
+         YouTube rate-limits (429), hence last
+
+    Every candidate is tried in turn (up to ``max_tracks``) until one
+    downloads. If the default extraction lists no captions at all, the
+    other player clients (``fallback_clients``) are asked before giving up;
+    only then does the planner fall back to audio + Whisper.
 
     Preference order for the format: json3 (clean, timed) > srt/vtt fallback
     through the awk-port cleaner.
@@ -103,59 +166,87 @@ class Transcript(BaseModule):
 
     def run(self, ctx: Context) -> None:
         info = ctx.info or {}
-        subs = info.get("subtitles") or {}
-        autos = info.get("automatic_captions") or {}
         lang = ctx.language or ""
-
-        track, track_name = self._pick_track(subs, autos, lang)
-        if not track:
-            log.warning("    no caption track available")
+        cands = self._caption_candidates(info.get("subtitles") or {},
+                                         info.get("automatic_captions") or {},
+                                         lang)
+        if not cands:
+            cands = self._probe_clients(ctx, lang)
+        if not cands:
+            log.warning("    no caption track in any language from any client")
             return
 
-        fmt = self._pick_fmt(track)
-        if not fmt:
-            log.warning("    caption track %s has no usable format", track_name)
+        for track, track_name in cands[:int(self.cfg.get("max_tracks", 4))]:
+            fmt = self._pick_fmt(track)
+            if not fmt:
+                log.warning("    caption track %s has no usable format", track_name)
+                continue
+            try:
+                raw = self._download(fmt["url"])
+            except (urllib.error.URLError, TimeoutError) as e:
+                log.warning("    caption track %s failed (%s) — trying next",
+                            track_name, e)
+                continue
+            ext = fmt.get("ext", "")
+            if ext == "json3":
+                ctx.transcript, ctx.segments = clean_json3(raw)
+                ctx.transcript_source = "json3"
+            else:
+                ctx.transcript, ctx.segments = clean_srt(raw)
+                ctx.transcript_source = ext or "srt"
+
+            (ctx.workdir / "cleaned_transcript.md").write_text(
+                ctx.transcript, encoding="utf-8")
+            log.info("    track=%s fmt=%s, %d segments, %d chars",
+                     track_name, ext, len(ctx.segments), len(ctx.transcript))
             return
+        log.warning("    no caption track could be downloaded")
 
-        raw = self._download(fmt["url"])
-        ext = fmt.get("ext", "")
-        if ext == "json3":
-            ctx.transcript, ctx.segments = clean_json3(raw)
-            ctx.transcript_source = "json3"
-        else:
-            ctx.transcript, ctx.segments = clean_srt(raw)
-            ctx.transcript_source = ext or "srt"
-
-        (ctx.workdir / "cleaned_transcript.md").write_text(
-            ctx.transcript, encoding="utf-8")
-        log.info("    track=%s fmt=%s, %d segments, %d chars",
-                 track_name, ext, len(ctx.segments), len(ctx.transcript))
+    def _probe_clients(self, ctx: Context, lang: str) -> list:
+        for client in self.cfg.get("fallback_clients", FALLBACK_CLIENTS):
+            try:
+                info = _captions_via_client(ctx.url, ctx.workdir, client)
+            except Exception as e:                # noqa: BLE001 — next client
+                log.warning("    client %s: %s", client, str(e).strip()[:120])
+                continue
+            cands = self._caption_candidates(info.get("subtitles") or {},
+                                             info.get("automatic_captions") or {},
+                                             lang)
+            log.info("    client %s: %d caption track(s)", client, len(cands))
+            if cands:
+                return cands
+        return []
 
     @staticmethod
-    def _pick_track(subs: dict, autos: dict, lang: str):
+    def _caption_candidates(subs: dict, autos: dict, lang: str) -> list:
+        """All caption tracks as [(track, name)], best first, no duplicates."""
+        keys: list[tuple[str, str]] = []
         if lang:
             base = lang.split("-")[0]
-            for key in (lang, base):
-                if key in subs:
-                    return subs[key], f"sub:{key}"
+            keys += [("sub", lang), ("sub", base)]
             # info.language may be regional ("en-US") while the original
             # ASR track is keyed by the base code ("en-orig"); the bare
             # "en" auto track is then a machine translation (tlang=en)
             # that YouTube 429s — so every -orig candidate goes first.
-            for key in (f"{lang}-orig", f"{base}-orig", lang, base):
-                if key in autos:
-                    return autos[key], f"auto:{key}"
-        # original ASR track is suffixed -orig even when info.language is empty
-        for key in autos:
-            if key.endswith("-orig"):
-                return autos[key], f"auto:{key}"
-        if subs:
-            key = next(iter(subs))
-            return subs[key], f"sub:{key}"
-        if autos:
-            key = next(iter(autos))
-            return autos[key], f"auto:{key}"
-        return None, ""
+            keys += [("auto", f"{lang}-orig"), ("auto", f"{base}-orig")]
+        keys += [("auto", k) for k in autos if k.endswith("-orig")]
+        keys += [("sub", k) for k in subs]
+        if lang:
+            keys += [("auto", lang), ("auto", base)]
+        keys += [("auto", k) for k in autos]
+        out, seen = [], set()
+        for kind, key in keys:
+            src = subs if kind == "sub" else autos
+            name = f"{kind}:{key}"
+            if key in src and name not in seen:
+                seen.add(name)
+                out.append((src[key], name))
+        return out
+
+    @staticmethod
+    def _pick_track(subs: dict, autos: dict, lang: str):
+        cands = Transcript._caption_candidates(subs, autos, lang)
+        return cands[0] if cands else (None, "")
 
     @staticmethod
     def _pick_fmt(track: list[dict]) -> dict | None:
@@ -216,10 +307,9 @@ class MediaDownload(BaseModule):
         fmt_audio = self._original_audio_selector(info)
         fmt = self.cfg.get("format") or f"bestvideo*+{fmt_audio}/best"
         outtmpl = self.cfg.get("outtmpl", "%(id)s.%(ext)s")
-        with _ydl(ctx.workdir, format=fmt,
-                  outtmpl={"default": outtmpl},
-                  merge_output_format="mp4") as ydl:
-            res = ydl.process_ie_result(dict(info), download=True)
+        res = _download_in_session(ctx, format=fmt,
+                                   outtmpl={"default": outtmpl},
+                                   merge_output_format="mp4")
         path = res.get("requested_downloads", [{}])[0].get("filepath") \
             or res.get("filepath")
         if path:
@@ -265,9 +355,8 @@ class AudioDownload(BaseModule):
         info = ctx.info or {}
         fmt = self.format_for(info, self.cfg)
         outtmpl = self.cfg.get("outtmpl", "%(id)s.%(ext)s")
-        with _ydl(ctx.workdir, format=fmt,
-                  outtmpl={"default": outtmpl}) as ydl:
-            res = ydl.process_ie_result(dict(info), download=True)
+        res = _download_in_session(ctx, format=fmt,
+                                   outtmpl={"default": outtmpl})
         path = res.get("requested_downloads", [{}])[0].get("filepath") \
             or res.get("filepath")
         if path:

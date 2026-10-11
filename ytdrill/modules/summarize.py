@@ -1,4 +1,4 @@
-"""Summarize module — Perplexity Sonar via stdlib urllib.
+"""Summarize module — Perplexity Sonar via the shared ytdrill.perplexity client.
 
 Secret resolution (in order, NEVER hardcoded — the repo will be public):
   1. env  PERPLEXITY_API_KEY
@@ -14,23 +14,13 @@ Prompt design carries over the empirically tested bits of yt2tw.sh:
 """
 from __future__ import annotations
 
-import json
 import logging
-import os
-import shlex
-import subprocess
-import urllib.request
 from pathlib import Path
 
 from .base import BaseModule, Context
+from ..perplexity import NO_SEARCH, chat, resolve_key
 
 log = logging.getLogger("ytdrill")
-
-API_URL = "https://api.perplexity.ai/chat/completions"
-
-NO_SEARCH = ("IMPORTANT: Do NOT search the web. Do NOT search the internet. "
-             "Do NOT retrieve any external sources or URLs. "
-             "Use ONLY the transcript and description provided in the user message.")
 
 SYSTEM_MSG = ("You are an expert academic writer and a proficient Markdown "
               "and LaTeX formatter. " + NO_SEARCH + " Your task is to "
@@ -46,7 +36,7 @@ class Summarize(BaseModule):
             log.warning("    empty transcript — skipping summarization")
             return
 
-        key = self._resolve_key()
+        key = resolve_key(self.cfg.get("secret_cmd", ""))
         model = self.cfg.get("model", "sonar")
         howto = self._load_howto(ctx)
 
@@ -68,51 +58,15 @@ class Summarize(BaseModule):
             f"instructions.\n{howto}"
         )
 
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_MSG},
-                {"role": "user", "content": user_msg},
-            ],
-            "max_tokens": int(self.cfg.get("max_tokens", 4096)),
-            "temperature": float(self.cfg.get("temperature", 0.2)),
-        }
-
-        req = urllib.request.Request(
-            API_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Authorization": f"Bearer {key}",
-                     "Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=300) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-
-        try:
-            ctx.summary = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError):
-            log.error("unexpected API response: %s", json.dumps(data)[:2000])
-            raise SystemExit(1)
+        ctx.summary = chat(key, model, SYSTEM_MSG, user_msg,
+                           max_tokens=int(self.cfg.get("max_tokens", 4096)),
+                           temperature=float(self.cfg.get("temperature", 0.2)))
 
         ctx.summary_model = model
         (ctx.workdir / "summary.md").write_text(ctx.summary, encoding="utf-8")
         log.info("    summary: %d chars (model=%s)", len(ctx.summary), model)
 
     # ------------------------------------------------------------------
-    def _resolve_key(self) -> str:
-        key = os.environ.get("PERPLEXITY_API_KEY", "").strip()
-        if key:
-            return key
-        cmd = self.cfg.get("secret_cmd", "")
-        if cmd:
-            out = subprocess.run(shlex.split(cmd), capture_output=True,
-                                 text=True, check=True).stdout.strip()
-            if out:
-                return out
-        raise SystemExit(
-            "No Perplexity key: set PERPLEXITY_API_KEY or configure "
-            "modules.summarize.secret_cmd (e.g. 'apivault get perplexity').")
-
     def _load_howto(self, ctx: Context) -> str:
         p = Path(self.cfg.get("howto",
                               Path(__file__).parents[2] / "prompts" / "howto.md"))
